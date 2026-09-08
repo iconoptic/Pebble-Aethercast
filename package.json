@@ -1,0 +1,69 @@
+{
+  "name": "pebble-aethercast",
+  "author": "btgrant",
+  "version": "0.1.0",
+  "keywords": [
+    "pebble-app"
+  ],
+  "private": true,
+  "dependencies": {
+    "@rebble/clay": "^1.1.0"
+  },
+  "pebble": {
+    "displayName": "AetherCast",
+    "uuid": "050144b3-3a1e-46f8-843e-fd9d879a1b56",
+    "sdkVersion": "3",
+    "enableMultiJS": true,
+    "targetPlatforms": [
+      "aplite",
+      "basalt",
+      "chalk",
+      "diorite",
+      "emery",
+      "flint",
+      "gabbro"
+    ],
+    "watchapp": {
+      "watchface": false
+    },
+    "capabilities": [
+      "location",
+      "configurable"
+    ],
+    "messageKeys": [
+      "MSG_TYPE",
+      "SCHEMA",
+      "UNIT_SYSTEM",
+      "TEMP_C10",
+      "FEELS_C10",
+      "HI_C10",
+      "LO_C10",
+      "HUMIDITY",
+      "WIND_KMH10",
+      "WIND_DIR",
+      "WX_CODE",
+      "IS_DAY",
+      "PRESS_HPA10",
+      "PRESS_SERIES",
+      "PRESS_NOW_IDX",
+      "PRESS_T0_UTC",
+      "SUNRISE_UTC",
+      "SUNSET_UTC",
+      "UPDATED_UTC",
+      "LOC_NAME",
+      "LAT_SIGN",
+      "ERR_CODE",
+      "REQUEST",
+      "PKJS_READY",
+      "TEMP_SERIES",
+      "WX_SERIES",
+      "DAILY_HI",
+      "DAILY_LO",
+      "DAILY_CODE",
+      "DAILY_T0_UTC"
+    ],
+    "resources": {
+      "media": []
+    }
+  }
+}

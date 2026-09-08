@@ -1,0 +1,17 @@
+# Pebble SDK build output
+build/
+*.pbw
+.lock-waf_*
+
+# Node
+node_modules/
+
+# Reference clones — regenerate with the commands in docs/vendor/README.md
+docs/reference/
+
+# OS / editor
+.DS_Store
+*.swp
+
+# Vendored docs are intentionally NOT ignored: they are the snapshot the plan
+# was written against. Refresh with ./tools/fetch-docs.sh
