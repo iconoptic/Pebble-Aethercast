@@ -3,16 +3,17 @@
 A Pebble Time 2 watchapp: current conditions, a **barometric pressure graph**
 (24 h back, 12 h ahead), and a **minimalist moon phase disc**.
 
-> **Status: M8 done** — cross-platform tuning (compact/narrow-width temperature
-> font, round-platform vertical+horizontal insets, B/W trend line-weight) and
-> a battery pass (the minute tick timer and model listener are only subscribed
-> while the dashboard is the visible window) are live, verified with screenshots
-> on all seven platforms. M7 (Clay settings, touch/gesture affordances) and
-> M4/M5/M6 (barograph, moon layer + host tests, conditions zone) also done. M9
-> (publish to apps.repebble.com) not started. **M10** (wire protocol v3 +
-> animated barograph/temperature detail screens replacing the old plain-list
-> Details screen) is code-complete and build/test-verified; emulator
-> screenshots and a few manual checks are still open.
+> **Status: M10 done** — wire protocol v3 (36-sample temperature + WMO series,
+> 4-day outlook) and the animated barograph/temperature detail screens are
+> code-complete, `emery`-verified on **both emulator and real Pebble Time 2
+> hardware** (side-loaded over the phone's Developer Connection): dashboard,
+> both detail screens, cursor scrub, all five synthetic data presets, and all
+> five `ERR_CODE` states all screenshotted. M1-M9 also done except M9 itself
+> (publish to apps.repebble.com — not started). Low-priority/best-effort items
+> still open: `gabbro`/`chalk` bezel-fit polish, a full `ERR_CODE` sweep on the
+> B/W platforms (`aplite`/`diorite`/`flint`) beyond the one already-confirmed
+> status-dot-shape check — `emery` is the only platform the project actually
+> targets.
 > Start at **[PLAN.md](PLAN.md)**.
 
 ## Why this exists

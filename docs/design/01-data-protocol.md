@@ -146,6 +146,16 @@ returning `NULL` until one arrives.
 |---|---|---|
 | `REQUEST` | uint8 | 1 = fetch now |
 
+> **PKJS-side gotcha (cost a real-device bug at M10):** in
+> `Pebble.addEventListener('appmessage', function (e) {...})`, `e.payload` is
+> keyed by the **symbolic key name** (e.g. `"REQUEST"`), not the numeric
+> `MessageKeys.REQUEST` id used everywhere on the *outbound* side
+> (`Pebble.sendAppMessage`, and all C code). `e.payload[MessageKeys.REQUEST]`
+> is therefore always `undefined` — read `e.payload.REQUEST` instead. This
+> only breaks on a real round trip; `tools/fake_payload.js`/
+> `FAKE_PAYLOAD_PRESET` sends straight from PKJS and never receives an
+> inbound `appmessage`, so it gives no coverage for this — see PLAN.md §8.
+
 ### Phone → watch handshake
 
 | Key | Type | Notes |
@@ -167,6 +177,12 @@ maps it to a short display string (`"NO PHONE"`, `"LOC OFF"`, `"NO FIX"`,
 `"NO NET"`, `"BAD DATA"`), which the dashboard header shows in red in place of
 the age text while `model_get_status() == MODEL_STATUS_ERROR`. Cached data
 stays on screen either way.
+
+`src/pkjs/index.js` races `navigator.geolocation.getCurrentPosition()` against
+its own `GEOLOCATION_GUARD_MS` (20 s) `setTimeout`, since real-device
+PebbleKit JS geolocation isn't guaranteed to honour its native `timeout`
+option and can otherwise hang indefinitely with no `ERR_CODE` sent at all —
+if the guard fires first it sends `ERR_CODE 2` itself.
 
 ## Encoding rules
 

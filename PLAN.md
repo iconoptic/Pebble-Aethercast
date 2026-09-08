@@ -3,12 +3,13 @@
 A Pebble Time 2 watchapp showing current conditions, a **barometric pressure graph**
 (24 h back + 12 h ahead), and a **minimalist moon phase disc**.
 
-> Status: **M8 done — cross-platform tuning, battery pass, and screenshots complete.**
-> M1-M7 also done. M9 (publish to apps.repebble.com) not started. M10 (wire
-> protocol v3 + animated barograph/temperature detail screens) code, host
-> tests, and docs done and `pebble build`-verified on all seven platforms;
-> emulator/screenshot manual-verification items still open (see M10 exit
-> criteria).
+> Status: **M10 done — wire protocol v3 + animated detail screens, verified on
+> both emulator and real hardware.** M1-M8 also done. M9 (publish to
+> apps.repebble.com) not started. M10's code, host tests, docs, emulator
+> screenshots (`docs/screenshots/m10-emery-*.png`) and a live real-device
+> round trip on `emery` (Pebble Time 2, over the phone's Developer Connection)
+> are all done — see §9 exit criteria for the two low-priority secondary-
+> platform checks still open.
 > Every hardware/API claim below was verified against a live source on 2026-09-05.
 > Sources are cached offline in [docs/vendor](docs/vendor) — see [docs/research/00-platform-findings.md](docs/research/00-platform-findings.md).
 
@@ -129,9 +130,11 @@ sequenceDiagram
     P->>C: AppMessage {PKJS_READY: 1}
     Note over C,P: The watch must not send REQUEST before PKJS is ready
     C->>P: AppMessage {REQUEST: 1}
+    Note over P: e.payload is keyed by the string "REQUEST",<br/>not the numeric MessageKeys id - see §8
     Note over C: 30 s watchdog timer starts
 
     P->>P: navigator.geolocation.getCurrentPosition()
+    Note over P: GEOLOCATION_GUARD_MS (20s) setTimeout races<br/>the native call in case it never calls back
     alt Location OK
         P->>O: GET /v1/forecast?lat&lon&current&hourly=pressure_msl,temperature_2m,weather_code&past_hours=24&forecast_hours=12&daily=...,weather_code&forecast_days=4
         O-->>P: 200 JSON (~2.4 kB)
@@ -139,13 +142,18 @@ sequenceDiagram
         P->>C: AppMessage {MSG_TYPE:1, ...27 keys, PRESS_SERIES/TEMP_SERIES: 72 bytes each}
         C->>C: persist_write() ×2 (core payload + forecast) + redraw
         C-->>U: Fresh data, "now" dot green
-    else Location denied / timeout
-        P->>C: AppMessage {MSG_TYPE:2, ERR_CODE: E_LOCATION}
-        C-->>U: Keep cached data, dot turns red
+    else Location denied / timeout / guard fires first
+        P->>C: AppMessage {MSG_TYPE:2, ERR_CODE: 1 or 2}
+        C-->>U: Keep cached data, dot turns red, model_error_text() shown
     end
 
-    Note over C,P: Watchdog fires → dot turns red if the phone stays silent
+    Note over C,P: Watchdog fires (30s, no phone reply at all) → dot turns red, "NO PHONE"
+
+    U->>C: SELECT / tap header (any time after launch)
+    C->>P: AppMessage {REQUEST: 1}
+    Note over C,P: Same fetch/error path repeats - no polling, only user- or settings-triggered
 ```
+
 
 After that first exchange the watch only fetches again when the user asks:
 `SELECT` (or a tap on the header) sends another `REQUEST`, and saving the Clay
@@ -446,7 +454,16 @@ put the maths somewhere a computer can check it.
    the emulator without waiting for real weather.
 4. **Emulator matrix.** `pebble install --emulator emery` primarily; then
    `gabbro`, `basalt`, `chalk`, `diorite` to catch hardcoded-layout regressions.
-5. **On-wrist.** `pebble install --cloudpebble --logs` via Dev Connect.
+5. **On-wrist.** `pebble install --phone <ip>` / `pebble logs --phone <ip>` via
+   the phone's Developer Connection. **Not optional for PKJS event-handler
+   changes**: `FAKE_PAYLOAD_PRESET` (used for every emulator check above) sends
+   payloads directly from PKJS and never exercises the real watch→`REQUEST`→
+   phone-`appmessage`-received round trip. That gap hid a real bug at M10 —
+   inbound `e.payload` is keyed by the symbolic key name (`"REQUEST"`), not the
+   numeric `MessageKeys.X` id used for outbound dicts — that only a live
+   round trip (or `pebble send-app-message` against a non-fake-preset build)
+   could catch. `pebble ping --phone <ip>` confirms the Developer Connection
+   transport itself before assuming the code is at fault.
 6. **Screenshot diffing.** `pebble screenshot` into `docs/screenshots/` at each
    milestone; the diffs are the review artefact.
 
@@ -550,6 +567,26 @@ the trend field a 60/40 share instead, verified in the emulator and via
 only platform that matters to the user): gabbro/chalk bezel fit check,
 aplite/diorite/flint B/W status-dot shape check.
 
+**M10.1 — real-hardware verification (2026-09-07, `emery`/Pebble Time 2, done):**
+side-loaded via `pebble install --phone <ip>` (Developer Connection over the
+phone's Wi-Fi↔BLE bridge). This surfaced a bug the emulator never could:
+`src/pkjs/index.js`'s `appmessage` handler read
+`e.payload[MessageKeys.REQUEST]`, but a real device's PebbleKit JS keys
+inbound `e.payload` by the **symbolic key name** (`"REQUEST"`), not the
+numeric `MessageKeys.X` id used for outbound dicts — so the check always
+missed, `fetchAndSend()` never ran, and the watch's 30 s watchdog fired every
+launch with a misleading "NO PHONE". Every prior manual check had used
+`FAKE_PAYLOAD_PRESET`, which sends straight from PKJS and never exercises the
+real watch→`REQUEST`→phone-`appmessage` round trip, so this path had no
+coverage until now. Fixed by reading `e.payload.REQUEST` instead; confirmed
+live via `pebble logs --phone <ip>` showing a stored payload
+(`loc=DENVER temp=26.8 press=1003.9`) and a screenshot of a fully populated
+dashboard. Also added a `GEOLOCATION_GUARD_MS` (20 s) JS-side `setTimeout`
+around `navigator.geolocation.getCurrentPosition()` in `fetchAndSend()`, as a
+belt-and-suspenders since real-device PebbleKit JS geolocation is not
+guaranteed to honour its own native `timeout` option and can otherwise hang
+silently past the watch's 30 s watchdog with no `ERR_CODE` at all.
+
 ---
 
 ## 10. Risks & decisions
@@ -561,6 +598,7 @@ aplite/diorite/flint B/W status-dot shape check.
 | Open-Meteo free tier limits / outage | No data | Fetches only on launch and on explicit user refresh — no polling, so call volume stays far below the 10 000/day limit; cache-first render; a stale/error dot never blanks the screen. |
 | Persistent storage limit ambiguity (docs 4 kB, blog 1 MB) | Write failure | Design to 4 kB / 256 B-per-key. Payload is ~140 B. |
 | Geolocation permission denied | No location | Clay manual lat/lon override; last known location persisted in JS `localStorage`. |
+| Real-device PebbleKit JS geolocation ignoring its native `timeout` | Silent hang past the watch's 30 s watchdog, generic "NO PHONE" instead of a real `ERR_CODE` | JS-side `GEOLOCATION_GUARD_MS` (20 s) `setTimeout` in `fetchAndSend()` wins if the native callback never fires at all; sends `ERR_CODE 2` (no fix) instead. |
 | 64-colour e-paper contrast | Unreadable graph | Restrict to a checked palette; verify every zone on the real device at M8; monochrome fallback path is the same code with `PBL_IF_COLOR_ELSE`. |
 | Touch unavailable in watchfaces | Blocks a future watchface variant | Ship as watchapp now; if a watchface is wanted later it must be button-only. Touch is strictly an enhancement, never the only path to any action. |
 | Emulator on Arch (unsupported distro) | Can't iterate locally | Package mapping above; CloudPebble as documented fallback. |
