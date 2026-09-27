@@ -9,6 +9,7 @@ var fs = require('fs');
 var path = require('path');
 
 var pack = require('../src/pkjs/pack');
+var geocode = require('../src/pkjs/geocode');
 var MessageKeys = require('message_keys');
 
 var fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/openmeteo-denver.json'), 'utf8'));
@@ -55,6 +56,8 @@ function testHappyPath() {
     assert.ok(Math.abs(temp[i] - fixture.hourly.temperature_2m[i]) <= 0.05,
               'TEMP_SERIES[' + i + '] round-trips within 0.1 degC precision');
   }
+  assert.strictEqual(dict[MessageKeys.LOC_NAME], 'DENVER',
+    'without a reverse-geocoded place, the header falls back to the timezone city');
   console.log('  ok: happy path (schema v3 fields present and correct)');
 }
 
@@ -99,8 +102,49 @@ function testOutlookPadsWhenDailyArraysAreShort() {
   console.log('  ok: short daily arrays pad by repeating the last day');
 }
 
+function testPlaceNameOverridesTimezoneCity() {
+  // Nebraska is Central Time, so Open-Meteo reports America/Chicago. The
+  // header must show the town at the coordinates, not that zone's city.
+  var moved = JSON.parse(JSON.stringify(fixture));
+  moved.timezone = 'America/Chicago';
+
+  var named = pack.packPayload(moved, nowUtcForFixture(), 1, '  North Platte  ');
+  assert.strictEqual(named[MessageKeys.LOC_NAME], 'NORTH PLATTE');
+
+  var fallback = pack.packPayload(moved, nowUtcForFixture(), 1, null);
+  assert.strictEqual(fallback[MessageKeys.LOC_NAME], 'CHICAGO');
+
+  var blank = pack.packPayload(moved, nowUtcForFixture(), 1, '   ');
+  assert.strictEqual(blank[MessageKeys.LOC_NAME], 'CHICAGO');
+
+  var longName = 'A Very Long Incorporated Place Name';
+  var truncated = pack.packPayload(moved, nowUtcForFixture(), 1, longName);
+  assert.strictEqual(truncated[MessageKeys.LOC_NAME], 'A VERY LONG INCORPORATE');
+  assert.strictEqual(truncated[MessageKeys.LOC_NAME].length, 23);
+  console.log('  ok: place name overrides timezone city and still fits LOC_NAME');
+}
+
+function testPlaceFromGeocodeResponse() {
+  assert.strictEqual(geocode.placeFromResponse({
+    city: 'Lincoln', locality: 'Lincoln', principalSubdivision: 'Nebraska'
+  }), 'Lincoln');
+  assert.strictEqual(geocode.placeFromResponse({
+    city: '', locality: 'Kearney', principalSubdivision: 'Nebraska'
+  }), 'Kearney');
+  assert.strictEqual(geocode.placeFromResponse({
+    city: '  ', locality: '', principalSubdivision: 'Nebraska'
+  }), 'Nebraska');
+  assert.strictEqual(geocode.placeFromResponse({}), null);
+  assert.strictEqual(geocode.placeFromResponse(null), null);
+  assert.ok(geocode.buildUrl(40.8136, -96.7026).indexOf('latitude=40.8136') !== -1);
+  assert.ok(geocode.buildUrl(40.8136, -96.7026).indexOf('longitude=-96.7026') !== -1);
+  console.log('  ok: reverse-geocode response prefers city, then locality, then state');
+}
+
 testHappyPath();
 testMissingHourlyTemperature();
 testMissingDailyWeatherCode();
 testOutlookPadsWhenDailyArraysAreShort();
+testPlaceNameOverridesTimezoneCity();
+testPlaceFromGeocodeResponse();
 console.log('all pack.js tests passed');

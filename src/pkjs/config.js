@@ -55,7 +55,7 @@ module.exports = [
   },
   {
     "type": "text",
-    "defaultValue": "Manual location only changes where weather is fetched from - it is never sent anywhere except Open-Meteo."
+    "defaultValue": "Coordinates are sent to Open-Meteo for the forecast and to BigDataCloud for the place name on the watch. They are not stored."
   },
   {
     "type": "submit",

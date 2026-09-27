@@ -3,6 +3,7 @@
 
 var MessageKeys = require('message_keys');
 var openmeteo = require('./openmeteo');
+var geocode = require('./geocode');
 var pack = require('./pack');
 var Clay = require('@rebble/clay');
 var clayConfig = require('./config');
@@ -81,10 +82,39 @@ function fetchAndSend() {
   }
 
   function onCoords(lat, lon) {
+    // Forecast and place name run together. The header used to be the IANA
+    // zone city (America/Chicago -> CHICAGO), which changes when you cross a
+    // time zone but is not the town the coordinates are in. A geocode miss
+    // still sends the forecast, labeled with that zone city.
+    var placeName = null;
+    var forecastJson = null;
+    var forecastDone = false;
+    var geocodeDone = false;
+    var failed = false;
+
+    function maybeSend() {
+      if (failed || !forecastDone || !geocodeDone) return;
+      sendDict(pack.packPayload(forecastJson, Math.floor(Date.now() / 1000),
+                                 settings.unitSystem, placeName));
+    }
+
     openmeteo.fetchForecast(lat, lon, function (json) {
-      sendDict(pack.packPayload(json, Math.floor(Date.now() / 1000), settings.unitSystem));
+      forecastJson = json;
+      forecastDone = true;
+      maybeSend();
     }, function (errCode) {
+      if (failed) return;
+      failed = true;
       sendDict(pack.packError(errCode));
+    });
+
+    geocode.reverseCity(lat, lon, function (name) {
+      placeName = name;
+      if (!name) {
+        console.log('AetherCast: reverse geocode missed, location label falls back to timezone');
+      }
+      geocodeDone = true;
+      maybeSend();
     });
   }
 

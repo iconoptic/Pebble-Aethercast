@@ -81,9 +81,13 @@ Confirmed facts:
 - `surface_pressure` (840.3 hPa at 1599 m) is station pressure and is **not** what
   we graph. `pressure_msl` (1006.6) is the meteorologically comparable value and
   is the only one sent over the wire; `surface_pressure` is requested but unused.
-- `timezone` string gives a free location label. `America/Denver` → `DENVER`
-  (take the substring after the last `/`, replace `_` with space, uppercase).
-  Zero extra requests, no reverse-geocoding provider, no key, no rate limit.
+- `timezone` is the IANA zone, whose last segment is one representative city
+  for the whole zone (`America/Denver` → `DENVER`, `America/Chicago` → `CHICAGO`).
+  That is not the town at `latitude`/`longitude`: most of Nebraska is
+  `America/Chicago`. The watch header uses a reverse-geocoded place name
+  (BigDataCloud, client-side, no key) and falls back to that zone city only
+  when the lookup misses. The fallback is uppercase, `_` replaced with space,
+  truncated to 23 characters.
 
 ### Picking "today" from `daily`
 
@@ -124,7 +128,7 @@ dictionary, not separate messages.
 | `SUNRISE_UTC` | int32 | epoch seconds | |
 | `SUNSET_UTC` | int32 | epoch seconds | |
 | `UPDATED_UTC` | int32 | epoch seconds | staleness reference |
-| `LOC_NAME` | cstring | ≤ 24 bytes incl. NUL | |
+| `LOC_NAME` | cstring | ≤ 24 bytes incl. NUL | reverse-geocoded place; timezone city if that lookup misses |
 | `LAT_SIGN` | int8 | +1 / −1 | southern hemisphere moon mirroring |
 | `ERR_CODE` | uint8 | only when `MSG_TYPE=2` | |
 

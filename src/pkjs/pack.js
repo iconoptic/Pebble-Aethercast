@@ -7,10 +7,20 @@ var HOURLY_SAMPLES = 36;
 var NOW_IDX = 24; // past_hours=24 -> sample 24 is the first forecast hour
 var OUTLOOK_DAYS = 4;
 
+// IANA zone names are one city for the whole zone: America/Denver covers
+// Mountain Time, America/Chicago covers Central Time (including Nebraska).
+// Using that as the place name is only a fallback for when reverse geocoding
+// misses. LOC_NAME's wire limit is 24 bytes including the NUL.
 function locNameFromTimezone(tz) {
   var parts = String(tz).split('/');
   var name = parts[parts.length - 1].replace(/_/g, ' ').toUpperCase();
-  return name.slice(0, 23); // LOC_NAME wire limit is 24 bytes incl. NUL
+  return name.slice(0, 23);
+}
+
+function formatLocName(placeName, timezone) {
+  var raw = placeName == null ? '' : String(placeName).replace(/\0/g, '').trim();
+  if (!raw) return locNameFromTimezone(timezone);
+  return raw.replace(/_/g, ' ').toUpperCase().slice(0, 23);
 }
 
 // Open-Meteo's response shape isn't schema-validated by anything upstream of
@@ -101,16 +111,16 @@ function packError(errCode) {
   return dict;
 }
 
-function packPayload(json, nowUtc, unitSystem) {
+function packPayload(json, nowUtc, unitSystem, placeName) {
   try {
-    return buildPayloadDict(json, nowUtc, unitSystem);
+    return buildPayloadDict(json, nowUtc, unitSystem, placeName);
   } catch (e) {
     console.log('AetherCast: malformed Open-Meteo response: ' + e.message);
     return packError(4);
   }
 }
 
-function buildPayloadDict(json, nowUtc, unitSystem) {
+function buildPayloadDict(json, nowUtc, unitSystem, placeName) {
   var pressure = fillNulls(json.hourly.pressure_msl);
   if (!pressure) return packError(4);
   pressure = normalizeLength(pressure);
@@ -154,7 +164,7 @@ function buildPayloadDict(json, nowUtc, unitSystem) {
   dict[MessageKeys.SUNRISE_UTC] = Math.round(num(json.daily.sunrise[todayIdx]));
   dict[MessageKeys.SUNSET_UTC] = Math.round(num(json.daily.sunset[todayIdx]));
   dict[MessageKeys.UPDATED_UTC] = nowUtc;
-  dict[MessageKeys.LOC_NAME] = locNameFromTimezone(json.timezone);
+  dict[MessageKeys.LOC_NAME] = formatLocName(placeName, json.timezone);
   dict[MessageKeys.LAT_SIGN] = num(json.latitude) < 0 ? -1 : 1;
   return dict;
 }
