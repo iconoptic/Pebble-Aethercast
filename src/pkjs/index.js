@@ -82,39 +82,32 @@ function fetchAndSend() {
   }
 
   function onCoords(lat, lon) {
-    // Forecast and place name run together. The header used to be the IANA
-    // zone city (America/Chicago -> CHICAGO), which changes when you cross a
-    // time zone but is not the town the coordinates are in. A geocode miss
-    // still sends the forecast, labeled with that zone city.
+    // Send the forecast as soon as it arrives. The header used to be the
+    // IANA zone city (America/Chicago -> CHICAGO), which changes when you
+    // cross a time zone but is not the town the coordinates are in. Use a
+    // reverse-geocoded place only when that lookup has already returned;
+    // otherwise pack.js labels the header with the zone city immediately.
+    // A geocode result that arrives later is not sent again.
     var placeName = null;
-    var forecastJson = null;
-    var forecastDone = false;
-    var geocodeDone = false;
-    var failed = false;
-
-    function maybeSend() {
-      if (failed || !forecastDone || !geocodeDone) return;
-      sendDict(pack.packPayload(forecastJson, Math.floor(Date.now() / 1000),
-                                 settings.unitSystem, placeName));
-    }
+    var sent = false;
 
     openmeteo.fetchForecast(lat, lon, function (json) {
-      forecastJson = json;
-      forecastDone = true;
-      maybeSend();
+      if (sent) return;
+      sent = true;
+      sendDict(pack.packPayload(json, Math.floor(Date.now() / 1000),
+                                 settings.unitSystem, placeName));
     }, function (errCode) {
-      if (failed) return;
-      failed = true;
+      if (sent) return;
+      sent = true;
       sendDict(pack.packError(errCode));
     });
 
     geocode.reverseCity(lat, lon, function (name) {
-      placeName = name;
       if (!name) {
         console.log('AetherCast: reverse geocode missed, location label falls back to timezone');
       }
-      geocodeDone = true;
-      maybeSend();
+      if (sent) return;
+      placeName = name;
     });
   }
 
