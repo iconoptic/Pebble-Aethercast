@@ -84,6 +84,22 @@ int16_t scale_trend_delta3(const int16_t series[SCALE_N_SAMPLES], uint8_t now_id
   return (int16_t)(series[now_idx] - series[now_idx - 3]);
 }
 
+bool scale_place_change_bit(const uint8_t mask[5], int idx) {
+  if (!mask || idx < 0 || idx >= SCALE_N_SAMPLES) {
+    return false;
+  }
+  return (mask[idx >> 3] & (uint8_t)(1u << (idx & 7))) != 0;
+}
+
+int16_t scale_effective_delta3(const int16_t *series, uint8_t now_idx,
+                               bool has_override, int16_t override_tenths) {
+  if (has_override) {
+    return override_tenths;
+  }
+  uint8_t clamped = now_idx < SCALE_N_SAMPLES ? now_idx : (uint8_t)(SCALE_N_SAMPLES - 1);
+  return scale_trend_delta3(series, clamped);
+}
+
 ScaleTrend scale_trend_from_delta3(int16_t delta3) {
   int16_t a = (int16_t)abs(delta3);
   if (a < 10) {

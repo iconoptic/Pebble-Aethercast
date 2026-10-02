@@ -424,6 +424,34 @@ function testSparseTrail() {
   console.log('  ok: sparse trail steps at the first hour the new place was seen');
 }
 
+function testBuildMaskBytes() {
+  // Byte table shared with tests/test_place_change.c. Little-endian, bit i
+  // in byte i>>3. A change at that index and nowhere else:
+  //   1  -> [2, 0, 0, 0, 0]
+  //   7  -> [128, 0, 0, 0, 0]
+  //   8  -> [0, 1, 0, 0, 0]
+  //   14 -> [0, 64, 0, 0, 0]
+  //   35 -> [0, 0, 0, 0, 8]
+  var expected = {
+    1: [2, 0, 0, 0, 0],
+    7: [128, 0, 0, 0, 0],
+    8: [0, 1, 0, 0, 0],
+    14: [0, 64, 0, 0, 0],
+    35: [0, 0, 0, 0, 8],
+  };
+  Object.keys(expected).forEach(function (key) {
+    var at = Number(key);
+    var used = [];
+    for (var i = 0; i < 36; i++) {
+      used.push({ lat: i < at ? 0 : 10, lon: 0 });
+    }
+    assert.deepStrictEqual(trail.buildMask(used), expected[key]);
+  });
+  // tools/fake_payload.js preset "trail" hardcodes the index-14 row.
+  assert.deepStrictEqual(expected[14], [0, 64, 0, 0, 0]);
+  console.log('  ok: buildMask bytes match the C place-change table');
+}
+
 function testUrlShape() {
   var url = openmeteo.buildUrlForCoords([
     { lat: 39.1, lon: -94.58 },
@@ -451,6 +479,7 @@ testManualOverrideBypass();
 testStoreWriteDoesNotThrow();
 testStitchFallbackToCurrent();
 testSparseTrail();
+testBuildMaskBytes();
 testWireKeys();
 testUrlShape();
 console.log('all trail tests passed');

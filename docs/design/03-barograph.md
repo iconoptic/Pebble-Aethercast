@@ -232,3 +232,7 @@ Assertions:
 - `x` is non-decreasing
 - flat input → all `y` equal, and equal to the vertical centre ±1
 - `MIN_SPAN` clamp engages exactly when `hi_raw − lo_raw < 80`
+- `scale_place_change_bit` reads the same little-endian bit JS `buildMask` writes
+  (`tests/test_place_change.c` and `tests/trail.test.js` share one byte table)
+- `scale_effective_delta3` returns a sent `PRESS_DELTA3`, including 0, and
+  otherwise `scale_trend_delta3` after clamping `now_idx`

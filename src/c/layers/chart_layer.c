@@ -89,7 +89,7 @@ void chart_layer_draw(GContext *ctx, GRect rect, const ChartSpec *spec) {
     graphics_context_set_stroke_width(ctx, 1);
     graphics_context_set_stroke_color(ctx, PBL_IF_COLOR_ELSE(GColorLightGray, GColorWhite));
     for (int i = 1; i < SCALE_N_SAMPLES; i++) {
-      if ((spec->place_change[i >> 3] & (uint8_t)(1u << (i & 7))) == 0) {
+      if (!scale_place_change_bit(spec->place_change, i)) {
         continue;
       }
       int16_t x = pts[i].x;

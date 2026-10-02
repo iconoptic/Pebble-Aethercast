@@ -216,17 +216,13 @@ static void prv_apply_payload(DictionaryIterator *iter) {
     memset(p.place_change, 0, sizeof(p.place_change));
   }
 
-  uint8_t now_idx = p.press_now_idx < SCALE_N_SAMPLES ? p.press_now_idx : SCALE_N_SAMPLES - 1;
+  // press_series sits at an odd offset in the packed payload; copy it out
+  // before handing its address to scale.c, same as the draw path.
+  int16_t aligned[SCALE_N_SAMPLES];
+  memcpy(aligned, p.press_series, sizeof(aligned));
   Tuple *delta = dict_find(iter, MESSAGE_KEY_PRESS_DELTA3);
-  if (delta) {
-    p.press_delta3 = (int16_t)delta->value->int32;
-  } else {
-    // press_series sits at an odd offset in the packed payload; copy it out
-    // before handing its address to scale.c, same as the draw path.
-    int16_t series[SCALE_N_SAMPLES];
-    memcpy(series, p.press_series, sizeof(series));
-    p.press_delta3 = scale_trend_delta3(series, now_idx);
-  }
+  p.press_delta3 = scale_effective_delta3(aligned, p.press_now_idx, delta != NULL,
+                                          delta ? (int16_t)delta->value->int32 : 0);
 
   Tuple *loc = dict_find(iter, MESSAGE_KEY_LOC_NAME);
   if (loc) {
