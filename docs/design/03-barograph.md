@@ -7,9 +7,10 @@ The reason this app exists.
 36 samples of MSL pressure in tenths of hPa, hourly, from `PRESS_SERIES`:
 
 - indices `0 … 23` — the last 24 hours (index 23 is the most recent past hour).
-  With "Follow me" this is the pressure along the user's trail, one place per
-  hour, not 24 h at the current coordinates. "This location only" and a
-  manual location keep the whole series at one place.
+  With "Follow me" each of those hours is the pressure at a place the app
+  had already recorded, not a continuous track of the trip and not 24 h at
+  the current coordinates. "This location only" and a manual location keep
+  the whole series at one place. See "Limits of the stitched history".
 - index `24` = `PRESS_NOW_IDX` — now, always the current location
 - indices `25 … 35` — the next 11 hours of forecast, always the current location
 
@@ -93,8 +94,9 @@ Draw order:
    top of the plot (2 px wide, about an eighth of the plot height). A tick
    that lands on the now-divider is nudged 3 px left so both stay visible.
    A missing mask draws nothing, on the dashboard and on the detail screen.
-   The step itself is real — the user changed cities — and the tick is what
-   separates it from weather.
+   The step is the new place's pressure against the previous one. The tick
+   marks the first hour that place was seen, which is what separates the
+   step from weather. It does not mark the hour the user arrived.
 6. **Now divider** at `x(24)`: vertical 1 px line, `GColorWhite`, full plot height.
 7. **Current-value dot**: 3 px filled circle at `(x(24), y(series[24]))`.
 
@@ -135,6 +137,36 @@ non-ASCII glyphs whose coverage in the system fonts is unverified.
 
 Falling pressure gets warm colours because a falling barometer is the thing you
 want to notice.
+
+## Limits of the stitched history
+
+The phone runs on launch, on SELECT / a header tap, and when Clay settings
+are saved. It does not sample in the background, and `recordFix` runs only
+from that refresh. Three consequences:
+
+- A place's recorded time is when the app first saw the user there.
+  `appendFix` keeps that first-seen time and does not move it when the same
+  place is seen again.
+- A place the user passed through between two opens is never recorded. The
+  graph has no way to invent it.
+- Example: the app is opened in Denver at 08:00 and next in Kansas City at
+  18:00. The past hours through 17:00 are Denver's pressure, the step and the
+  place-change tick sit at 18:00, even if the drive ended at 14:00. The tick
+  means "first seen at the new place", not "arrived".
+
+The 3 h trend still uses the current place's own delta when that tick falls
+inside the trend window, so the late step is not classified as a front.
+
+## Open questions
+
+A gap longer than 3 h could place the tick at the midpoint between the last
+fix at the old place and the first fix at the new one. In the Denver →
+Kansas City example that would move the mark from 18:00 toward 13:00, nearer
+a drive that might have finished at 14:00. It would still be a guess: the
+phone never saw the departure, and the hours before the midpoint would keep
+Denver's pressure while the tick claimed the user had already left, so the
+mark would no longer sit on the sample where the series changes. Left as
+first-seen until that trade-off is chosen.
 
 ## Units
 

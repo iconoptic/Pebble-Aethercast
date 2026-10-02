@@ -616,6 +616,7 @@ silently past the watch's 30 s watchdog with no `ERR_CODE` at all.
 | 64-colour e-paper contrast | Unreadable graph | Restrict to a checked palette; verify every zone on the real device at M8; monochrome fallback path is the same code with `PBL_IF_COLOR_ELSE`. |
 | Touch unavailable in watchfaces | Blocks a future watchface variant | Ship as watchapp now; if a watchface is wanted later it must be button-only. Touch is strictly an enhancement, never the only path to any action. |
 | Emulator on Arch (unsupported distro) | Can't iterate locally | Package mapping above; CloudPebble as documented fallback. |
+| Sparse trail: no background polling | A drive between two opens is drawn as a step at the second open, not at the hour the user arrived | Tick marks first-seen; documented in `docs/design/03-barograph.md`; trend uses the current place's own delta. |
 
 ---
 

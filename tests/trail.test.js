@@ -372,6 +372,58 @@ function testStitchFallbackToCurrent() {
   console.log('  ok: stitch failure falls back to the current location');
 }
 
+function testSparseTrail() {
+  // Opened in Denver at 08:00, next in Kansas City at 18:00. Nothing was
+  // recorded on the drive, so the step is the second open.
+  var hour = 3600;
+  var midnight = Math.floor(1700000000 / hour) * hour;
+  var denverT = midnight + 8 * hour;
+  var kcT = midnight + 18 * hour;
+  var now = kcT + 10 * 60;
+
+  var store = trail.createStore(memoryStorage());
+  store.recordFix(39.7392, -104.9903, denverT);
+  store.recordFix(39.099, -94.578, kcT);
+  var places = store.loadPlaces();
+  assert.strictEqual(places.length, 2);
+  assert.strictEqual(places[0].t, denverT);
+  assert.strictEqual(places[1].t, kcT);
+
+  var denver = { lat: 39.74, lon: -104.99 };
+  var kc = { lat: 39.1, lon: -94.58 };
+  var stLouis = { lat: 38.63, lon: -90.2 };
+  var plan = trail.planFetch(places, kc, now, { hours: {} });
+  assert.strictEqual(plan.coords.length, 2);
+  for (var c = 0; c < plan.coords.length; c++) {
+    assert.ok(!trail.samePlace(plan.coords[c], stLouis), 'a place never recorded is not fetched');
+    assert.ok(trail.samePlace(plan.coords[c], denver) || trail.samePlace(plan.coords[c], kc));
+  }
+
+  var t0 = plan.hourTimes[0];
+  var out = trail.integrate(plan, [
+    forecast(kc.lat, kc.lon, series(1018), t0),
+    forecast(denver.lat, denver.lon, series(1006), t0),
+  ], { hours: {} });
+  assert.ok(!out.error);
+
+  var changeAt = -1;
+  for (var i = 0; i < plan.hourTimes.length; i++) {
+    if (plan.hourTimes[i] >= kcT) {
+      changeAt = i;
+      break;
+    }
+  }
+  assert.ok(changeAt > 0);
+  for (var h = 0; h < changeAt; h++) {
+    assert.strictEqual(out.pressure[h], 1006, 'hours before 18:00 stay on Denver');
+    assert.strictEqual(bit(out.placeChange, h), false);
+  }
+  assert.strictEqual(plan.hourTimes[changeAt], kcT);
+  assert.strictEqual(bit(out.placeChange, changeAt), true, 'the tick is the first hour at or after 18:00');
+  assert.strictEqual(out.pressure[changeAt], 1018);
+  console.log('  ok: sparse trail steps at the first hour the new place was seen');
+}
+
 function testUrlShape() {
   var url = openmeteo.buildUrlForCoords([
     { lat: 39.1, lon: -94.58 },
@@ -398,6 +450,7 @@ testCacheFreezesPastHours();
 testManualOverrideBypass();
 testStoreWriteDoesNotThrow();
 testStitchFallbackToCurrent();
+testSparseTrail();
 testWireKeys();
 testUrlShape();
 console.log('all trail tests passed');
