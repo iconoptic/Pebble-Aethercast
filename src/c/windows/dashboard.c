@@ -39,11 +39,6 @@ static GRect s_zone_baro;
 // (success or watchdog timeout) so this timer can never run forever.
 static AppTimer *s_refresh_indicator_timer;
 static uint8_t s_refresh_dots;
-// Non-zero while prv_arm_refresh_indicator or the indicator tick is on
-// the stack, including across app_timer_register. A listener notified
-// from that window sees this and returns instead of registering a second
-// timer. A count, not a bool, so an inner frame cannot clear an outer one.
-static uint8_t s_refresh_indicator_arming;
 
 static GRect prv_zone(GRect bounds, int16_t *y, uint16_t permille) {
   int16_t height = (int16_t)(bounds.size.h * permille / 1000);
@@ -172,10 +167,15 @@ static void prv_root_update_proc(Layer *layer, GContext *ctx) {
     // to a placeholder that exists to say that sample is not "now".
     barograph_draw_loading(ctx, plot_inset);
   } else {
-    bool reanchored = graph.mode == MODEL_GRAPH_REANCHORED;
+    // Use the series sample only when the divider has actually moved.
+    // A failed refresh of a still-honest cache keeps press_hpa10.
+    int recorded = payload && payload->press_now_idx < SCALE_N_SAMPLES
+                       ? (int)payload->press_now_idx
+                       : SCALE_N_SAMPLES - 1;
+    bool value_from_sample = !payload || graph.now_idx != recorded;
     GRect label_inset = GRect(blabel_rect.origin.x + 4, blabel_rect.origin.y,
                               blabel_rect.size.w - 8, blabel_rect.size.h);
-    barograph_draw_label(ctx, label_inset, payload, graph.now_idx, reanchored);
+    barograph_draw_label(ctx, label_inset, payload, graph.now_idx, value_from_sample);
     barograph_draw_plot(ctx, plot_inset, payload, graph.now_idx);
   }
 
@@ -195,26 +195,23 @@ static void prv_refresh_indicator_tick(void *data);
 
 // Single place that calls app_timer_register for the header dots.
 // Idempotent: a call while a tick is already pending returns immediately
-// and does not reset the dot phase. A re-entrant call (this function
-// already on the stack — for example prv_model_changed running again
-// because a listener fired during arming) also returns, so it cannot
-// register a second timer before s_refresh_indicator_timer is stored.
+// and does not reset the dot phase. app_timer_register never callbacks
+// synchronously and layer_mark_dirty does not redraw synchronously, so
+// the pending-timer check alone is enough — no re-entrancy flag.
 // reset_phase is true only when a refresh starts; the tick reschedules
 // with false so the ".", "..", "..." cycle keeps advancing.
 // Bounded by model.c's 30s request watchdog: model_is_refreshing() is
 // guaranteed to go false (success or timeout), and the tick then stops
 // rescheduling.
 static void prv_arm_refresh_indicator(bool reset_phase) {
-  if (s_refresh_indicator_timer || s_refresh_indicator_arming) {
+  if (s_refresh_indicator_timer) {
     return;
   }
-  s_refresh_indicator_arming++;
   if (reset_phase) {
     s_refresh_dots = 0;
   }
   s_refresh_indicator_timer = app_timer_register(
       REFRESH_INDICATOR_MS, prv_refresh_indicator_tick, NULL);
-  s_refresh_indicator_arming--;
 }
 
 static void prv_start_refresh_indicator(void) {
@@ -225,7 +222,7 @@ static void prv_model_changed(void) {
   // PKJS_READY starts the launch refresh without a click. Arm the header
   // dots here so that path cycles the same way SELECT does. Safe to call
   // on every model update: prv_arm_refresh_indicator is a no-op while its
-  // timer is already pending or while it is already on the stack.
+  // timer is already pending.
   if (model_is_refreshing()) {
     prv_start_refresh_indicator();
   }
@@ -234,18 +231,12 @@ static void prv_model_changed(void) {
 
 static void prv_refresh_indicator_tick(void *data) {
   (void)data;
-  // NULL until the reschedule below. Hold the arming count across that
-  // window, including the redraw, so a listener that re-enters
-  // prv_start_refresh_indicator cannot register its own timer or reset
-  // the dot phase while no tick is pending.
   s_refresh_indicator_timer = NULL;
   if (!model_is_refreshing()) {
     return;
   }
   s_refresh_dots++;
-  s_refresh_indicator_arming++;
   prv_mark_dirty();
-  s_refresh_indicator_arming--;
   prv_arm_refresh_indicator(false);
 }
 

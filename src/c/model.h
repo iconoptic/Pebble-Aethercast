@@ -92,7 +92,7 @@ typedef enum {
   MODEL_GRAPH_ABSENT = 0, // no payload; caller draws the empty outline
   MODEL_GRAPH_LOADING,    // refresh in flight and the recorded now is >= 1 sample behind
   MODEL_GRAPH_LIVE,       // divider at the payload's press_now_idx
-  MODEL_GRAPH_REANCHORED, // refresh failed; now_idx recomputed from the wall clock
+  MODEL_GRAPH_REANCHORED, // recorded now is >= 1 sample behind and nothing is in flight; now_idx from the wall clock
 } ModelGraphMode;
 
 typedef struct {

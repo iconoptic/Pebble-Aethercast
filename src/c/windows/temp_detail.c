@@ -1,6 +1,7 @@
 #include "temp_detail.h"
 #include "detail_window.h"
 #include "../model.h"
+#include "../layers/barograph_layer.h"
 #include "../layers/chart_layer.h"
 #include "../layers/icon_layer.h"
 #include "../lib/scale.h"
@@ -26,8 +27,10 @@ static void prv_disappear(void *context) {
   model_remove_listener(prv_model_changed);
 }
 
-static uint8_t prv_now_idx(const WeatherPayload *payload) {
-  return payload->press_now_idx < SCALE_N_SAMPLES ? payload->press_now_idx : SCALE_N_SAMPLES - 1;
+// Same graph-view anchor as the barograph: re-anchored when the cache is
+// misleading, last sample when the series no longer covers "now".
+static int prv_anchor_idx(const ModelGraphView *view) {
+  return view->now_idx >= 0 ? view->now_idx : SCALE_N_SAMPLES - 1;
 }
 
 static void prv_fmt_time(int32_t utc, char *buf, size_t len) {
@@ -94,7 +97,9 @@ static void prv_draw_outlook(GContext *ctx, GRect rect, const ForecastPayload *f
 static void prv_draw(GContext *ctx, GRect bounds, void *context) {
   const WeatherPayload *payload = model_get_payload();
   const ForecastPayload *forecast = model_get_forecast();
-  if (!payload || !forecast) {
+  ModelGraphView view;
+  model_get_graph_view(&view);
+  if (!payload || !forecast || view.mode == MODEL_GRAPH_ABSENT) {
     graphics_context_set_text_color(ctx, GColorWhite);
     graphics_draw_text(ctx, "No forecast yet.", fonts_get_system_font(FONT_KEY_GOTHIC_18),
                         bounds, GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
@@ -103,8 +108,8 @@ static void prv_draw(GContext *ctx, GRect bounds, void *context) {
 
   int16_t series[SCALE_N_SAMPLES];
   memcpy(series, forecast->temp_series, sizeof(series));
-  uint8_t now_idx = prv_now_idx(payload);
-  int cursor = s_cursor_idx < 0 ? now_idx : s_cursor_idx;
+  int anchor = prv_anchor_idx(&view);
+  int cursor = s_cursor_idx < 0 ? anchor : s_cursor_idx;
 
   int16_t title_h = (int16_t)(bounds.size.h * 14 / 100);
   int16_t outlook_h = (int16_t)(bounds.size.h * 26 / 100);
@@ -115,31 +120,39 @@ static void prv_draw(GContext *ctx, GRect bounds, void *context) {
   graphics_draw_text(ctx, "TEMPERATURE", fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD), title_rect,
                       GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
 
-  char cursor_buf[24], time_buf[8], val_buf[8];
-  prv_fmt_time(payload->press_t0_utc + (int32_t)cursor * 3600, time_buf, sizeof(time_buf));
-  units_format_temp_c10(series[cursor], val_buf, sizeof(val_buf));
-  snprintf(cursor_buf, sizeof(cursor_buf), "%s %s", time_buf, val_buf);
-  graphics_draw_text(ctx, cursor_buf, fonts_get_system_font(FONT_KEY_GOTHIC_18), title_rect,
-                      GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
-
   GRect chart_rect = GRect(bounds.origin.x + 8, (int16_t)(bounds.origin.y + title_h),
                            bounds.size.w - 16, chart_h);
-  int16_t lo, hi;
-  scale_bounds_ex(series, SCALE_MIN_SPAN_TEMP, &lo, &hi);
-  ChartSpec spec = {
-    .series = series,
-    .now_idx = now_idx,
-    .min_span = SCALE_MIN_SPAN_TEMP,
-    .line_color = GColorOrange,
-    .past_width = 2,
-    .show_grid = true,
-    .grid_step = scale_grid_step(lo, hi),
-    .cursor_idx = s_cursor_idx,
-  };
-  chart_layer_draw(ctx, chart_rect, &spec);
 
-  prv_draw_sun_tick(ctx, chart_rect, payload->press_t0_utc, payload->sunrise_utc);
-  prv_draw_sun_tick(ctx, chart_rect, payload->press_t0_utc, payload->sunset_utc);
+  // Same rule as the barograph: a misleading cache with a refresh in
+  // flight shows the placeholder; otherwise the divider follows the
+  // graph-view now_idx (re-anchored when the recorded hour is stale).
+  if (view.mode == MODEL_GRAPH_LOADING) {
+    barograph_draw_loading(ctx, chart_rect);
+  } else {
+    char cursor_buf[24], time_buf[8], val_buf[8];
+    prv_fmt_time(payload->press_t0_utc + (int32_t)cursor * 3600, time_buf, sizeof(time_buf));
+    units_format_temp_c10(series[cursor], val_buf, sizeof(val_buf));
+    snprintf(cursor_buf, sizeof(cursor_buf), "%s %s", time_buf, val_buf);
+    graphics_draw_text(ctx, cursor_buf, fonts_get_system_font(FONT_KEY_GOTHIC_18), title_rect,
+                        GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
+
+    int16_t lo, hi;
+    scale_bounds_ex(series, SCALE_MIN_SPAN_TEMP, &lo, &hi);
+    ChartSpec spec = {
+      .series = series,
+      .now_idx = view.now_idx,
+      .min_span = SCALE_MIN_SPAN_TEMP,
+      .line_color = GColorOrange,
+      .past_width = 2,
+      .show_grid = true,
+      .grid_step = scale_grid_step(lo, hi),
+      .cursor_idx = s_cursor_idx,
+    };
+    chart_layer_draw(ctx, chart_rect, &spec);
+
+    prv_draw_sun_tick(ctx, chart_rect, payload->press_t0_utc, payload->sunrise_utc);
+    prv_draw_sun_tick(ctx, chart_rect, payload->press_t0_utc, payload->sunset_utc);
+  }
 
   GRect outlook_rect = GRect(bounds.origin.x, (int16_t)(bounds.origin.y + title_h + chart_h),
                              bounds.size.w, outlook_h);
@@ -151,8 +164,10 @@ static void prv_click(ButtonId id, void *context) {
   if (!payload) {
     return;
   }
-  uint8_t now_idx = prv_now_idx(payload);
-  int cursor = s_cursor_idx < 0 ? now_idx : s_cursor_idx;
+  ModelGraphView view;
+  model_get_graph_view(&view);
+  int anchor = prv_anchor_idx(&view);
+  int cursor = s_cursor_idx < 0 ? anchor : s_cursor_idx;
   if (id == BUTTON_ID_UP && cursor > 0) {
     s_cursor_idx = cursor - 1;
   } else if (id == BUTTON_ID_DOWN && cursor < SCALE_N_SAMPLES - 1) {

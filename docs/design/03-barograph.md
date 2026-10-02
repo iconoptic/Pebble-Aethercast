@@ -121,11 +121,14 @@ the recorded now-sample (`press_hpa10` is the reading at fetch time; the trend
 is `series[now] − series[now−3]` there), so printing them next to the
 placeholder would still assert the stale hour. `model_note_request_sent()`
 notifies listeners, so the placeholder replaces the curve as soon as the launch
-`REQUEST` goes out, not only when the payload comes back.
+`REQUEST` goes out, not only when the payload comes back. LOADING is reserved
+for that in-flight case only — with no phone, `PKJS_READY` never arrives and
+nothing would clear a placeholder shown at launch before any request.
 
-If the refresh ends in `MODEL_STATUS_ERROR` (no phone, no fix, watchdog, …) the
-placeholder comes down and the cached curve is shown. The divider is moved to
-the sample that actually contains the wall clock:
+When the inequality holds and **nothing** is in flight (launch before the
+minute-tick retry, or after a failed refresh), the cached curve is shown with
+the divider moved to the sample that actually contains the wall clock,
+whatever the status (`FRESH` / `STALE` / `ERROR`):
 
 ```
 now_idx = (now - press_t0_utc) / 3600
@@ -135,7 +138,7 @@ implemented by `scale_reanchor_now_idx()`:
 
 | `now` vs the series | Divider |
 |---|---|
-| `now < press_t0_utc` (clock skew) | Clamped to sample 0 |
+| `now < press_t0_utc` (clock skew) | No divider and no current-value dot |
 | Inside the series | That sample. Past/forecast split follows it, so hours that were forecast at fetch time and are now behind the divider draw solid |
 | At or past the end of sample 35 | No divider and no current-value dot. The whole curve draws as the past segment |
 
@@ -192,8 +195,9 @@ unitless, so adding inHg (`v * 0.02953 / 10` → `29.72 inHg`) or mmHg
 | Extreme range (e.g. 40 hPa over 24 h) | 10% padding, curve stays inside the rect |
 | Cached data, divider still on the right hour | Plot is drawn from the cached series. Staleness is the header dot and age. A cache younger than one sample (`MODEL_GRAPH_MISLEADING_AFTER_S`) always takes this path, including while a refresh is in flight |
 | Cached now is ≥ 1 sample behind, refresh in flight | Loading placeholder in the plot zone (dotted midline + `UPDATING`). The value/trend label is omitted — it is computed from that same sample |
-| Refresh failed, series still covers now | Cached curve, now-divider re-anchored (see below). Label value is the sample under the divider, so it matches the dot |
-| Refresh failed, series does not cover now | Whole curve drawn as the past segment, no now-divider and no current-value dot. Label shows the last sample. The header's red `model_error_text()` says why |
+| Launch / idle, cached now ≥ 1 sample behind, no request yet | Cached curve, now-divider re-anchored. Not LOADING — with no phone nothing would clear it. Same path for FRESH/STALE/ERROR |
+| Misleading cache, series still covers now (incl. after failed refresh) | Cached curve, now-divider re-anchored. Label value is the sample under the divider only when that index differs from `press_now_idx`; otherwise keep `press_hpa10` |
+| Misleading cache, series does not cover now | Whole curve drawn as the past segment, no now-divider and no current-value dot. Label shows the last sample. On ERROR the header's red `model_error_text()` says why |
 | No payload at all | Empty plot rect outline in `GColorDarkGray`, no label row |
 | `PRESS_NOW_IDX` out of range | Clamped to `SCALE_N_SAMPLES - 1` before use |
 | Non-`emery` platform | Plot rect derived from unobstructed bounds; sample count unchanged |
@@ -243,4 +247,4 @@ Assertions:
 - `scale_reanchor_now_idx`: a fresh cache (now on sample 24) stays at 24,
   including 59 minutes into that hour; 3 h later is 27; 11 h later is 35;
   12 h later (and anything past the last sample) is −1 so the divider is
-  omitted; `now < press_t0_utc` clamps to 0
+  omitted; `now < press_t0_utc` is also −1 (omit the divider)

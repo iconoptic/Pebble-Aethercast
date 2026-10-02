@@ -178,6 +178,15 @@ Rules:
   On a watch rated for 30 days, leaving a per-minute redraw running behind
   another window is a real cost.
 
+Barograph / temperature chart state (shared `model_get_graph_view`):
+
+| Cache vs clock | Refresh | Chart |
+|---|---|---|
+| Divider still on the right hour | any | Live curve at `press_now_idx` |
+| ≥ 1 h behind | in flight | `UPDATING` placeholder (dashboard plot + both detail charts) |
+| ≥ 1 h behind | none yet (launch before `PKJS_READY` / minute tick) | Re-anchored curve — not placeholder |
+| ≥ 1 h behind | failed / idle | Re-anchored curve (or no divider past the series) |
+
 ## Detail screens
 
 DOWN pushes an expanded, full-bleed **barograph detail** (`windows/baro_detail.c`);

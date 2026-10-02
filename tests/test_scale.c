@@ -193,9 +193,9 @@ static void test_reanchor_now_idx(void) {
   assert(scale_reanchor_now_idx(t0, t0 + (recorded + 12) * hour) == -1);
   assert(scale_reanchor_now_idx(t0, t0 + 100 * hour) == -1);
 
-  // Clock skew: now before sample 0 clamps to the start of the series.
-  assert(scale_reanchor_now_idx(t0, t0 - 1) == 0);
-  assert(scale_reanchor_now_idx(t0, t0 - hour) == 0);
+  // Clock skew: now before sample 0 omits the divider (same as past the end).
+  assert(scale_reanchor_now_idx(t0, t0 - 1) == -1);
+  assert(scale_reanchor_now_idx(t0, t0 - hour) == -1);
   assert(scale_reanchor_now_idx(t0, t0) == 0);
 
   // Placeholder threshold is one full sample of lag, not a second less.

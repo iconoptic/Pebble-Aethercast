@@ -61,11 +61,10 @@ int16_t scale_grid_step(int16_t lo, int16_t hi);
 // Hourly sample that contains `now_utc` in a series whose sample 0 starts
 // at `t0_utc`.
 //
-// Returns 0 when `now_utc` is before sample 0 (clock skew: clamp to the
-// start of the series). Returns -1 when `now_utc` is at or after the end
-// of the last sample, so the caller omits the now-divider — the series no
-// longer covers the present, and pinning the divider on the last forecast
-// hour would claim that hour is "now". Otherwise an index in
+// Returns -1 when `now_utc` is before sample 0 (clock skew) or at/after the
+// end of the last sample, so the caller omits the now-divider — the series
+// does not cover the present, and pinning the divider on sample 0 or the
+// last forecast hour would claim that hour is "now". Otherwise an index in
 // [0, SCALE_N_SAMPLES).
 int scale_reanchor_now_idx(int32_t t0_utc, int32_t now_utc);
 

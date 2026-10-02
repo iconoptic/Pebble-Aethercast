@@ -184,12 +184,16 @@ void model_get_graph_view(ModelGraphView *out) {
   int32_t now = (int32_t)time(NULL);
   bool misleading = scale_recorded_now_lag_s(s_payload.press_t0_utc, (uint8_t)recorded, now)
                     >= MODEL_GRAPH_MISLEADING_AFTER_S;
-  if (s_refreshing && misleading) {
-    out->mode = MODEL_GRAPH_LOADING;
-    out->now_idx = recorded;
-    return;
-  }
-  if (s_status == MODEL_STATUS_ERROR) {
+  // Misleading cache: LOADING only while a refresh can clear it. Otherwise
+  // re-anchor whatever the status (FRESH/STALE/ERROR) — at launch with no
+  // phone, PKJS_READY never arrives and nothing is in flight until the
+  // minute tick, so LOADING would stick forever.
+  if (misleading) {
+    if (s_refreshing) {
+      out->mode = MODEL_GRAPH_LOADING;
+      out->now_idx = recorded;
+      return;
+    }
     out->mode = MODEL_GRAPH_REANCHORED;
     out->now_idx = scale_reanchor_now_idx(s_payload.press_t0_utc, now);
     return;
@@ -296,7 +300,10 @@ void model_apply_inbox(DictionaryIterator *iter) {
     prv_apply_payload(iter);
   } else {
     APP_LOG(APP_LOG_LEVEL_ERROR, "model: unexpected MSG_TYPE=%d", (int)msg_type);
-    return;
   }
+  // Always notify: s_refreshing was cleared above, and the detail screens
+  // have no minute tick of their own. Skipping here leaves UPDATING up.
+  // prv_apply_payload's early returns (schema / PRESS_SERIES) also land
+  // here after setting ERROR; the watchdog path notifies on its own.
   prv_notify();
 }
