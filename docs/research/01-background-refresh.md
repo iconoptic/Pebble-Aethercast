@@ -167,19 +167,24 @@ The implementation is the opt-in wakeup the task describes, default **off**:
   `SAMPLE_HRS` rides every success and error dict. Absent means "older phone
   build, leave the stored interval alone"; `0` means off. `SCHEMA` stays 3.
 - Every launch, wakeup or normal, cancels our wakeup and arms
-  `now + interval`. `E_RANGE` retries up to five times, 90 s later each
-  time, which clears the one-minute exclusion window.
+  `now + interval` (opening the app resets the timer). `E_RANGE` retries up
+  to five times, 90 s later each time, which clears the one-minute exclusion
+  window. Inbox repeats of the same `SAMPLE_HRS` do not rewrite flash or
+  reschedule when a wakeup is already pending (`wakeup_query` on key 4).
 - `APP_LAUNCH_WAKEUP` pushes a one-line "Sampling / location" window instead
   of the dashboard, sends the usual `REQUEST`, and exits when the inbox
   lands or the 30 s watchdog fires. A 45 s deadline exits if the phone never
   answers at all, so a covered or half-connected launch cannot sit there.
+  Quiet Time (`quiet_time_is_active`, when the SDK has it) or a disconnected
+  phone (`connection_service_peek_pebble_app_connection`) aborts before the
+  sample window: re-arm and exit with no REQUEST.
 - A wakeup that fires while the user already has the app open refreshes in
   place and does not exit.
 - `notify_if_missed` is false.
 
-A trail point is written only when Follow me is on. Manual location and
-"This location only" still wake the watch and refresh that fixed place;
-the Clay copy says so.
+A trail point is written only when Follow me is on. When the trail is
+inactive (manual location or "This location only"), JS sends `SAMPLE_HRS = 0`
+so the watch cancels its wakeup — there is nothing useful to sample.
 
 ### What this does not fix
 

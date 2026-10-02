@@ -629,7 +629,8 @@ silently past the watch's 30 s watchdog with no `ERR_CODE` at all.
 | 64-colour e-paper contrast | Unreadable graph | Restrict to a checked palette; verify every zone on the real device at M8; monochrome fallback path is the same code with `PBL_IF_COLOR_ELSE`. |
 | Touch unavailable in watchfaces | Blocks a future watchface variant | Ship as watchapp now; if a watchface is wanted later it must be button-only. Touch is strictly an enhancement, never the only path to any action. |
 | Emulator on Arch (unsupported distro) | Can't iterate locally | Package mapping above; CloudPebble as documented fallback. |
-| Sparse trail: no background polling | A drive between two opens is drawn as a step at the second open, not at the hour the user arrived | Tick marks first-seen; documented in `docs/design/03-barograph.md`; trend uses the current place's own delta. |
+| Sparse trail between refreshes | A drive between two opens is drawn as a step at the second open, not at the hour the user arrived | Tick marks first-seen; documented in `docs/design/03-barograph.md`; trend uses the current place's own delta. Opt-in Background location (wakeup every 1/2/4 h, default off) densifies the trail when Follow me is on. |
+| Wakeup interrupts other apps / battery | Opt-in background samples take the screen and burn a refresh | Off by default; skips Quiet Time and phone-disconnected launches; cancels when the trail cannot grow; Clay copy warns it may interrupt another open app. |
 
 ---
 

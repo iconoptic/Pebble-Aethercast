@@ -14,4 +14,15 @@ assert.strictEqual(sampleHours.normalizeSampleHours(3), 0);
 assert.strictEqual(sampleHours.normalizeSampleHours('2'), 2);
 assert.strictEqual(sampleHours.normalizeSampleHours('nope'), 0);
 
+// A2: wakeups are cancelled when the trail cannot grow. index.js passes
+// trail.trailActive(settings); trailActive itself is covered in trail.test.js.
+assert.strictEqual(
+  sampleHours.hoursForWatch({ sampleHours: 2 }, true), 2);
+assert.strictEqual(
+  sampleHours.hoursForWatch({ sampleHours: 2 }, false), 0);
+assert.strictEqual(
+  sampleHours.hoursForWatch({ sampleHours: 4 }, false), 0);
+assert.strictEqual(
+  sampleHours.hoursForWatch({ sampleHours: 3 }, true), 0);
+
 console.log('sample_hours tests passed');

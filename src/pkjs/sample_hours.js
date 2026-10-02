@@ -8,6 +8,15 @@ function normalizeSampleHours(value) {
   return 0;
 }
 
+// What the watch should store as SAMPLE_HRS. When the trail is inactive
+// (manual location or "This location only"), a wakeup cannot extend the
+// trail — send 0 so the watch cancels its schedule.
+function hoursForWatch(settings, trailIsActive) {
+  if (!trailIsActive) return 0;
+  return normalizeSampleHours(settings && settings.sampleHours);
+}
+
 module.exports = {
   normalizeSampleHours: normalizeSampleHours,
+  hoursForWatch: hoursForWatch,
 };

@@ -82,7 +82,7 @@ module.exports = [
           { "label": "Every 2 hours", "value": 2 },
           { "label": "Every 4 hours", "value": 4 }
         ],
-        "description": "Off by default. When on, the watch opens by itself on that interval, records where you are, updates the cache, and closes. It takes the screen while it does this."
+        "description": "Off by default. When on, the watch briefly opens the app every N hours, records where you are (only if Follow me is on), updates the cache, and closes. It skips Quiet Time and times when the phone is disconnected. Opening the app also resets the timer. On some watches it may interrupt another open app."
       }
     ]
   },

@@ -100,10 +100,11 @@ Do not assume index 1.
 
 The past half of the barograph is stitched from the user's trail
 (`src/pkjs/trail.js`), so one refresh may ask for more than one coordinate.
-A trail entry is written only on a refresh (launch, SELECT, or saving
-settings). Its time is when that refresh first saw the user there. A place
-passed between two refreshes is absent, and the place-change tick falls on
-the first hour of the newly seen place. See
+A trail entry is written only on a refresh (launch, SELECT, saving
+settings, or — when Background location is on and Follow me is active —
+an opt-in wakeup). Its time is when that refresh first saw the user there.
+A place passed between two refreshes is absent, and the place-change tick
+falls on the first hour of the newly seen place. See
 [03-barograph.md](03-barograph.md) "Limits of the stitched history".
 Open-Meteo accepts comma-separated `latitude` and `longitude` lists of equal
 length. Verified live on 2026-10-02 for Denver (`39.74,-104.99`) and Kansas

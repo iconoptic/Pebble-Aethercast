@@ -91,7 +91,10 @@ function loadSettings() {
 function sendDict(dict) {
   // PKJS_READY has no MSG_TYPE and must not grow a sample interval.
   if (dict && (dict[MessageKeys.MSG_TYPE] === 1 || dict[MessageKeys.MSG_TYPE] === 2)) {
-    dict[MessageKeys.SAMPLE_HRS] = loadSettings().sampleHours;
+    var settings = loadSettings();
+    // Wakeups only help when Follow me can store a trail point.
+    dict[MessageKeys.SAMPLE_HRS] = sampleHours.hoursForWatch(
+      settings, trail.trailActive(settings));
   }
   Pebble.sendAppMessage(dict, function () {
     console.log('AetherCast: sent ' + JSON.stringify(dict));

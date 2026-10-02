@@ -75,29 +75,25 @@ static void prv_window_load(Window *window) {
   text_layer_set_font(s_detail, fonts_get_system_font(FONT_KEY_GOTHIC_18));
   text_layer_set_text_alignment(s_detail, GTextAlignmentCenter);
   layer_add_child(root, text_layer_get_layer(s_detail));
-}
 
-static void prv_window_unload(Window *window) {
-  (void)window;
-  text_layer_destroy(s_title);
-  text_layer_destroy(s_detail);
-  s_title = NULL;
-  s_detail = NULL;
-}
-
-static void prv_window_appear(Window *window) {
-  (void)window;
+  // Listener and deadline live until unload, not disappear: a notification
+  // modal fires disappear without ending the sample, and clearing here used
+  // to drop the inbox until 45 s after the modal was dismissed.
   model_set_listener(prv_model_changed);
   s_deadline = app_timer_register(QUIET_DEADLINE_MS, prv_deadline_fired, NULL);
 }
 
-static void prv_window_disappear(Window *window) {
+static void prv_window_unload(Window *window) {
   (void)window;
   model_set_listener(NULL);
   if (s_deadline) {
     app_timer_cancel(s_deadline);
     s_deadline = NULL;
   }
+  text_layer_destroy(s_title);
+  text_layer_destroy(s_detail);
+  s_title = NULL;
+  s_detail = NULL;
 }
 
 void sample_window_push(void) {
@@ -106,8 +102,6 @@ void sample_window_push(void) {
   window_set_window_handlers(s_window, (WindowHandlers) {
     .load = prv_window_load,
     .unload = prv_window_unload,
-    .appear = prv_window_appear,
-    .disappear = prv_window_disappear,
   });
   window_stack_push(s_window, true);
 }
