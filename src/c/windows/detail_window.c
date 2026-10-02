@@ -102,6 +102,10 @@ static void prv_window_load(Window *window) {
 static void prv_window_unload(Window *window) {
   layer_destroy(s_content);
   s_content = NULL;
+  // detail_window_push creates a Window on every open; free it here so
+  // open/close cycles do not leak (aplite heap is ~8 KB).
+  window_destroy(window);
+  s_window = NULL;
 }
 
 void detail_window_push(const DetailSpec *spec) {
