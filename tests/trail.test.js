@@ -311,6 +311,67 @@ function testWireKeys() {
   console.log('  ok: wire keys stay optional and the trail preset carries the mask');
 }
 
+function testStoreWriteDoesNotThrow() {
+  var store = trail.createStore({
+    getItem: function () { return null; },
+    setItem: function () { throw new Error('quota'); },
+    removeItem: function () { throw new Error('quota'); },
+  });
+  var places;
+  assert.doesNotThrow(function () {
+    places = store.recordFix(39.7392, -104.9903, 1000);
+  });
+  assert.strictEqual(places.length, 1, 'the in-memory trail is returned when the write fails');
+  assert.doesNotThrow(function () {
+    store.saveCache({ hours: { '1': { lat: 39.74, lon: -104.99, p: 1010 } } });
+  });
+  assert.doesNotThrow(function () {
+    store.clear();
+  });
+  assert.deepStrictEqual(store.loadPlaces(), []);
+  console.log('  ok: storage failures do not throw');
+}
+
+function testStitchFallbackToCurrent() {
+  var t0 = 997200;
+  var times = hourlyTimes(t0);
+  var denver = { lat: 39.74, lon: -104.99 };
+  var kc = { lat: 39.1, lon: -94.58 };
+  var places = [
+    { t: times[0] - 5, lat: denver.lat, lon: denver.lon },
+    { t: times[10], lat: kc.lat, lon: kc.lon },
+  ];
+  var plan = trail.planFetch(places, kc, t0 + 24 * 3600 + 600, { hours: {} });
+  assert.strictEqual(plan.coords[0].lat, kc.lat);
+  assert.ok(plan.coords.length >= 2);
+
+  // Denver's grid point is missing; a far-away body must not be paired with it.
+  var kcJson = forecast(kc.lat, kc.lon, series(function (i) { return 1010 + i; }), t0);
+  var far = forecast(0, 0, series(900), t0);
+  var unmatched = [kcJson, far];
+  var unmatchedStitch = trail.integrate(plan, unmatched, { hours: {} });
+  assert.strictEqual(unmatchedStitch.error, 4);
+  var current = trail.fallbackCurrent(plan, unmatched);
+  assert.strictEqual(current, kcJson);
+  assert.ok(trail.distanceKm(current.latitude, current.longitude, kc.lat, kc.lon) <= 50);
+
+  // One place's series is not an array. The current location's object is still usable.
+  var broken = forecast(denver.lat, denver.lon, series(1000), t0);
+  broken.hourly.pressure_msl = { not: 'an array' };
+  var badSeries = [kcJson, broken];
+  var badStitch = trail.integrate(plan, badSeries, { hours: {} });
+  assert.strictEqual(badStitch.error, 4);
+  assert.strictEqual(trail.fallbackCurrent(plan, badSeries), kcJson);
+  assert.ok(Array.isArray(trail.fallbackCurrent(plan, badSeries).hourly.pressure_msl));
+
+  var only = forecast(kc.lat, kc.lon, series(1010), t0);
+  only.hourly.pressure_msl = null;
+  assert.strictEqual(trail.fallbackCurrent(plan, [only]), only);
+
+  assert.strictEqual(trail.fallbackCurrent(plan, [far]), null, 'nothing near the current fix');
+  console.log('  ok: stitch failure falls back to the current location');
+}
+
 function testUrlShape() {
   var url = openmeteo.buildUrlForCoords([
     { lat: 39.1, lon: -94.58 },
@@ -335,6 +396,8 @@ testDownsampleAndCallCount();
 testStitchNullsMaskAndTrend();
 testCacheFreezesPastHours();
 testManualOverrideBypass();
+testStoreWriteDoesNotThrow();
+testStitchFallbackToCurrent();
 testWireKeys();
 testUrlShape();
 console.log('all trail tests passed');

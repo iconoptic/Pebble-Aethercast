@@ -111,25 +111,54 @@ function fetchSingle(lat, lon, settings) {
   });
 }
 
+// The multi-place body could not be stitched. Send the current location's
+// forecast with no pressure/placeChange/delta3Tenths opts — the same dict
+// fetchSingle would build — and do not write a stitched cache. A second
+// HTTP request happens only when that object is not already in hand.
+function sendTrailFallback(plan, results, lat, lon, settings) {
+  var current = trail.fallbackCurrent(plan, results);
+  if (current) {
+    console.log('AetherCast: trail stitch failed, sending the current location only');
+    sendForecast(current, settings);
+    return;
+  }
+  console.log('AetherCast: trail stitch failed and the current result was unusable');
+  fetchSingle(lat, lon, settings);
+}
+
 function fetchTrail(lat, lon, settings) {
   var now = Math.floor(Date.now() / 1000);
-  trailStore.recordFix(lat, lon, now);
-  var plan = trail.planFetch(trailStore.loadPlaces(), { lat: lat, lon: lon }, now, trailStore.loadCache());
+  var plan;
+  try {
+    // recordFix returns the in-memory trail even when localStorage refuses
+    // the write, so this refresh still names the place we are in.
+    var places = trailStore.recordFix(lat, lon, now);
+    plan = trail.planFetch(places, { lat: lat, lon: lon }, now, trailStore.loadCache());
+  } catch (e) {
+    console.log('AetherCast: trail plan failed: ' + (e && e.message ? e.message : e));
+    fetchSingle(lat, lon, settings);
+    return;
+  }
   console.log('AetherCast: trail places=' + plan.places.length +
               ' distinct=' + plan.coords.length);
   openmeteo.fetchForecasts(plan.coords, function (results) {
-    var integrated = trail.integrate(plan, results, trailStore.loadCache());
-    if (integrated.error) {
-      sendDict(pack.packError(integrated.error));
-      return;
+    try {
+      var integrated = trail.integrate(plan, results, trailStore.loadCache());
+      if (!integrated || integrated.error) {
+        sendTrailFallback(plan, results, lat, lon, settings);
+        return;
+      }
+      trailStore.saveCache(integrated.cache);
+      var opts = { pressure: integrated.pressure };
+      if (integrated.placeChange) opts.placeChange = integrated.placeChange;
+      if (integrated.delta3Tenths !== null && integrated.delta3Tenths !== undefined) {
+        opts.delta3Tenths = integrated.delta3Tenths;
+      }
+      sendForecast(integrated.currentJson, settings, opts);
+    } catch (e) {
+      console.log('AetherCast: trail stitch failed: ' + (e && e.message ? e.message : e));
+      sendTrailFallback(plan, results, lat, lon, settings);
     }
-    trailStore.saveCache(integrated.cache);
-    var opts = { pressure: integrated.pressure };
-    if (integrated.placeChange) opts.placeChange = integrated.placeChange;
-    if (integrated.delta3Tenths !== null && integrated.delta3Tenths !== undefined) {
-      opts.delta3Tenths = integrated.delta3Tenths;
-    }
-    sendForecast(integrated.currentJson, settings, opts);
   }, function (errCode) {
     sendDict(pack.packError(errCode));
   });

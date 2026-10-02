@@ -116,7 +116,8 @@ City (`39.10,-94.58`), `past_hours=24&forecast_hours=12&timeformat=unixtime`:
   `39.746895`). The second element carried `location_id: 1`; the first
   omitted it. Array order matched the request this time, but the app does
   not trust that: it pairs each result to the coordinate it asked for by
-  distance, and rejects the body if a coordinate has no result within 50 km.
+  distance. A coordinate with no result within 50 km fails the *stitch*,
+  not the refresh.
 - Each coordinate counts as one free-tier API call, even though they share a
   single HTTP request. The app sends at most 6, current location first.
 
@@ -135,6 +136,20 @@ older than 30 h are dropped.
 | Follow me, one place, or every other place already cached | 1 |
 | Follow me, N places with an unresolved past hour | N (2 ≤ N ≤ 6), one HTTP request |
 | Manual location, or "This location only" | 1, and the trail is not read or extended |
+
+If stitching fails for any reason — a coordinate with no result within 50 km,
+a place whose `hourly.pressure_msl` is not an array, or an exception while
+planning or packing — the phone sends the plain single-place payload for the
+current location. That dict has no `PLACE_CHANGE` mask and no `PRESS_DELTA3`.
+It is not an error, as long as the current location's forecast is usable.
+`plan.coords[0]` is that fix, and a successful alignment puts its object
+first; when alignment itself fails, the phone picks the result nearest the
+current fix from the body it already has, so the fallback is not a second
+HTTP request and does not change what was sent to Open-Meteo. Only a current
+location that cannot be found in that body is refetched on its own. A
+`localStorage` failure while recording the fix or the pressure cache is
+logged and ignored; the in-memory trail is what this refresh uses, and the
+watch still receives weather instead of waiting out the 30 s watchdog.
 
 ## Wire format (phone → watch)
 

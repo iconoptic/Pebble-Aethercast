@@ -444,6 +444,36 @@ function integrate(plan, results, cache) {
   };
 }
 
+// The current location's forecast object from a multi-place response, or
+// null when nothing in `results` sits within MATCH_KM of plan.current.
+// alignResults puts that place first when every coordinate paired; if
+// pairing failed, the nearest result to the current fix is used instead.
+// The caller sends this as a plain single-place payload. It does not
+// refetch and it does not look at the other places' series.
+function fallbackCurrent(plan, results) {
+  if (!plan) return null;
+  var aligned = alignResults(plan.coords, results);
+  if (aligned && aligned[0]) return aligned[0];
+  var target = plan.current;
+  if ((!target || !isFinite(target.lat) || !isFinite(target.lon)) && plan.coords && plan.coords[0]) {
+    target = plan.coords[0];
+  }
+  if (!target || !Array.isArray(results)) return null;
+  var best = null;
+  var bestDist = Infinity;
+  for (var i = 0; i < results.length; i++) {
+    var r = results[i];
+    if (!r || !isFinite(r.latitude) || !isFinite(r.longitude)) continue;
+    var dist = distanceKm(target.lat, target.lon, r.latitude, r.longitude);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = r;
+    }
+  }
+  if (!best || bestDist > MATCH_KM) return null;
+  return best;
+}
+
 function createStore(storage) {
   function read(key) {
     try {
@@ -454,8 +484,23 @@ function createStore(storage) {
       return null;
     }
   }
+  // Quota errors and a disabled localStorage must not escape into the
+  // geolocation callback: the watch would then wait out its 30 s watchdog
+  // and show "NO PHONE" with a good forecast sitting unused. The in-memory
+  // value is what the current refresh uses; the next launch re-reads storage.
   function write(key, value) {
-    storage.setItem(key, JSON.stringify(value));
+    try {
+      storage.setItem(key, JSON.stringify(value));
+    } catch (e) {
+      console.log('AetherCast: could not store ' + key);
+    }
+  }
+  function remove(key) {
+    try {
+      storage.removeItem(key);
+    } catch (e) {
+      console.log('AetherCast: could not remove ' + key);
+    }
   }
   return {
     loadPlaces: function () {
@@ -477,8 +522,8 @@ function createStore(storage) {
       write(CACHE_KEY, { v: 1, hours: (cache && cache.hours) || {} });
     },
     clear: function () {
-      storage.removeItem(TRAIL_KEY);
-      storage.removeItem(CACHE_KEY);
+      remove(TRAIL_KEY);
+      remove(CACHE_KEY);
     },
   };
 }
@@ -504,6 +549,7 @@ module.exports = {
   planFetch: planFetch,
   integrate: integrate,
   alignResults: alignResults,
+  fallbackCurrent: fallbackCurrent,
   buildMask: buildMask,
   createStore: createStore,
 };
