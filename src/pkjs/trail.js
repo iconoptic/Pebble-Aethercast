@@ -110,8 +110,8 @@ function prunePlaces(places, now) {
 }
 
 // Append a fix. A fix within CLUSTER_KM of the newest place does not move
-// that place's entry time or coordinates — the entry time is when the user
-// arrived, which is what hour assignment needs.
+// that place's entry time or coordinates — the entry time is when the place
+// was first seen, which is what hour assignment needs.
 function appendFix(places, lat, lon, t) {
   var fix = { t: t, lat: roundCoord(lat), lon: roundCoord(lon) };
   var next = places.slice();

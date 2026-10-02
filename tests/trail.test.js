@@ -312,16 +312,25 @@ function testWireKeys() {
 }
 
 function testStoreWriteDoesNotThrow() {
+  var m = {};
   var store = trail.createStore({
-    getItem: function () { return null; },
+    getItem: function (k) { return Object.prototype.hasOwnProperty.call(m, k) ? m[k] : null; },
     setItem: function () { throw new Error('quota'); },
-    removeItem: function () { throw new Error('quota'); },
+    removeItem: function (k) { delete m[k]; },
+  });
+  // Seed a place through the map so loadPlaces is not trivially empty.
+  m['aethercast-trail'] = JSON.stringify({
+    v: 1,
+    places: [{ t: 1000, lat: 39.74, lon: -104.99 }],
   });
   var places;
   assert.doesNotThrow(function () {
-    places = store.recordFix(39.7392, -104.9903, 1000);
+    places = store.recordFix(39.099, -94.578, 5000);
   });
-  assert.strictEqual(places.length, 1, 'the in-memory trail is returned when the write fails');
+  assert.strictEqual(places.length, 2, 'the in-memory trail is returned when the write fails');
+  assert.strictEqual(places[0].lat, 39.74);
+  assert.strictEqual(places[1].lat, 39.1);
+  assert.strictEqual(places[1].lon, -94.58);
   assert.doesNotThrow(function () {
     store.saveCache({ hours: { '1': { lat: 39.74, lon: -104.99, p: 1010 } } });
   });
@@ -374,17 +383,26 @@ function testStitchFallbackToCurrent() {
 
 function testSparseTrail() {
   // Opened in Denver at 08:00, next in Kansas City at 18:00. Nothing was
-  // recorded on the drive, so the step is the second open.
+  // recorded on the drive, so the step is the second open. now is 4 h after
+  // the KC fix so 18:00 lands at index 20 (not at NOW_IDX, where assignHours
+  // always uses the current place and would hide a late first-seen time).
   var hour = 3600;
   var midnight = Math.floor(1700000000 / hour) * hour;
   var denverT = midnight + 8 * hour;
   var kcT = midnight + 18 * hour;
-  var now = kcT + 10 * 60;
+  var now = kcT + 4 * hour + 10 * 60;
+  var changeAt = 20;
 
   var store = trail.createStore(memoryStorage());
+  // St. Louis was recorded before Denver's 08:00 fix. Its stay had already
+  // ended by the time Denver began, so retention drops it once the prune
+  // clock is past Denver + RETENTION — a place that was never recorded
+  // proves nothing about that filter.
+  store.recordFix(38.627, -90.199, denverT - 40 * hour);
   store.recordFix(39.7392, -104.9903, denverT);
   store.recordFix(39.099, -94.578, kcT);
-  var places = store.loadPlaces();
+  assert.strictEqual(store.loadPlaces().length, 3, 'St. Louis was recorded');
+  var places = trail.prunePlaces(store.loadPlaces(), denverT + trail.RETENTION_S);
   assert.strictEqual(places.length, 2);
   assert.strictEqual(places[0].t, denverT);
   assert.strictEqual(places[1].t, kcT);
@@ -395,32 +413,31 @@ function testSparseTrail() {
   var plan = trail.planFetch(places, kc, now, { hours: {} });
   assert.strictEqual(plan.coords.length, 2);
   for (var c = 0; c < plan.coords.length; c++) {
-    assert.ok(!trail.samePlace(plan.coords[c], stLouis), 'a place never recorded is not fetched');
+    assert.ok(!trail.samePlace(plan.coords[c], stLouis), 'a retained-out place is not fetched');
     assert.ok(trail.samePlace(plan.coords[c], denver) || trail.samePlace(plan.coords[c], kc));
   }
 
   var t0 = plan.hourTimes[0];
+  assert.strictEqual(plan.hourTimes[changeAt], kcT);
   var out = trail.integrate(plan, [
     forecast(kc.lat, kc.lon, series(1018), t0),
     forecast(denver.lat, denver.lon, series(1006), t0),
   ], { hours: {} });
   assert.ok(!out.error);
 
-  var changeAt = -1;
-  for (var i = 0; i < plan.hourTimes.length; i++) {
-    if (plan.hourTimes[i] >= kcT) {
-      changeAt = i;
-      break;
-    }
-  }
-  assert.ok(changeAt > 0);
   for (var h = 0; h < changeAt; h++) {
-    assert.strictEqual(out.pressure[h], 1006, 'hours before 18:00 stay on Denver');
+    assert.strictEqual(out.pressure[h], 1006, 'hours before index 20 stay on Denver');
     assert.strictEqual(bit(out.placeChange, h), false);
   }
-  assert.strictEqual(plan.hourTimes[changeAt], kcT);
-  assert.strictEqual(bit(out.placeChange, changeAt), true, 'the tick is the first hour at or after 18:00');
-  assert.strictEqual(out.pressure[changeAt], 1018);
+  assert.strictEqual(bit(out.placeChange, changeAt), true, 'the tick is at index 20 (18:00)');
+  assert.strictEqual(bit(out.placeChange, 19), false);
+  assert.strictEqual(bit(out.placeChange, 21), false);
+  assert.strictEqual(bit(out.placeChange, 22), false);
+  assert.strictEqual(bit(out.placeChange, 23), false);
+  assert.strictEqual(bit(out.placeChange, 24), false);
+  for (var k = changeAt; k <= 24; k++) {
+    assert.strictEqual(out.pressure[k], 1018, 'index ' + k + ' is Kansas City');
+  }
   console.log('  ok: sparse trail steps at the first hour the new place was seen');
 }
 
@@ -447,8 +464,6 @@ function testBuildMaskBytes() {
     }
     assert.deepStrictEqual(trail.buildMask(used), expected[key]);
   });
-  // tools/fake_payload.js preset "trail" hardcodes the index-14 row.
-  assert.deepStrictEqual(expected[14], [0, 64, 0, 0, 0]);
   console.log('  ok: buildMask bytes match the C place-change table');
 }
 

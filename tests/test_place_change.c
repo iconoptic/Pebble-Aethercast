@@ -12,23 +12,27 @@
 
 #include <assert.h>
 #include <stdio.h>
-#include <string.h>
 
 #include "../src/c/lib/scale.h"
 
-static void prv_set_only(uint8_t mask[5], int idx) {
-  memset(mask, 0, 5);
-  mask[idx >> 3] = (uint8_t)(1u << (idx & 7));
-}
-
-static void test_bits_round_trip(void) {
-  static const int kIdx[] = {0, 1, 7, 8, 14, 35};
-  for (int n = 0; n < (int)(sizeof(kIdx) / sizeof(kIdx[0])); n++) {
+static void test_literal_masks(void) {
+  // Literal masks from the shared table in the header comment. Each must
+  // light only the named index — do not rebuild them with the same shift
+  // expression the implementation uses.
+  static const struct {
+    int idx;
     uint8_t mask[5];
-    prv_set_only(mask, kIdx[n]);
+  } kLit[] = {
+    {1, {2, 0, 0, 0, 0}},
+    {7, {128, 0, 0, 0, 0}},
+    {8, {0, 1, 0, 0, 0}},
+    {14, {0, 64, 0, 0, 0}},
+    {35, {0, 0, 0, 0, 8}},
+  };
+  for (int n = 0; n < (int)(sizeof(kLit) / sizeof(kLit[0])); n++) {
     for (int i = 0; i < SCALE_N_SAMPLES; i++) {
-      bool on = scale_place_change_bit(mask, i);
-      assert(on == (i == kIdx[n]));
+      bool on = scale_place_change_bit(kLit[n].mask, i);
+      assert(on == (i == kLit[n].idx));
     }
   }
 }
@@ -71,7 +75,7 @@ static void test_effective_delta3(void) {
 }
 
 void test_place_change_run(void) {
-  test_bits_round_trip();
+  test_literal_masks();
   test_bit_edges();
   test_trail_preset_mask();
   test_effective_delta3();

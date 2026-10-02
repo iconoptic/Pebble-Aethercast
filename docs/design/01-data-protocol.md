@@ -144,17 +144,23 @@ older than 30 h are dropped.
 
 If stitching fails for any reason — a coordinate with no result within 50 km,
 a place whose `hourly.pressure_msl` is not an array, or an exception while
-planning or packing — the phone sends the plain single-place payload for the
-current location. That dict has no `PLACE_CHANGE` mask and no `PRESS_DELTA3`.
-It is not an error, as long as the current location's forecast is usable.
-`plan.coords[0]` is that fix, and a successful alignment puts its object
-first; when alignment itself fails, the phone picks the result nearest the
-current fix from the body it already has, so the fallback is not a second
-HTTP request and does not change what was sent to Open-Meteo. Only a current
-location that cannot be found in that body is refetched on its own. A
-`localStorage` failure while recording the fix or the pressure cache is
-logged and ignored; the in-memory trail is what this refresh uses, and the
-watch still receives weather instead of waiting out the 30 s watchdog.
+planning or integrating — the phone sends the plain single-place payload for
+the current location. That dict has no `PLACE_CHANGE` mask and no
+`PRESS_DELTA3`. It is not an error, as long as the current location's
+forecast is usable. (`packPayload` itself returns `packError(4)` on a bad
+body; that path is not a stitch fallback.) `plan.coords[0]` is the current
+fix, and a successful alignment puts its object first; when alignment
+itself fails, the phone picks the result nearest the current fix from the
+body it already has. That in-hand fallback sends nothing extra to
+Open-Meteo. Only when the current location cannot be found in that body does
+the phone make the normal single-place request — the same one a non-trail
+refresh makes — and only while the shared time budget from the trail
+request still has at least 5 s left (both requests together stay under
+about 25 s against the watch's 30 s watchdog); otherwise it sends
+`packError(4)`. A `localStorage` failure while recording the fix or the
+pressure cache is logged and ignored; the in-memory trail is what this
+refresh uses, and the watch still receives weather instead of waiting out
+the 30 s watchdog.
 
 ## Wire format (phone → watch)
 

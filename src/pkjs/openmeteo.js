@@ -43,12 +43,13 @@ function normalizeResults(parsed) {
 // onError receives one of the ERR_CODE values from the data protocol doc:
 // 3 = HTTP/network failure, 4 = bad response (parse failure).
 // onSuccess receives an array of forecast objects, one per coordinate.
-function fetchForecasts(coords, onSuccess, onError) {
+// timeoutMs caps the XHR; omit for the default 15 s.
+function fetchForecasts(coords, onSuccess, onError, timeoutMs) {
   // One HTTP request. Open-Meteo's free tier counts each coordinate.
   console.log('AetherCast: Open-Meteo ' + coords.length + ' location(s), ' +
               coords.length + ' API call(s)');
   var xhr = new XMLHttpRequest();
-  xhr.timeout = 15000;
+  xhr.timeout = timeoutMs > 0 ? timeoutMs : 15000;
   xhr.onload = function () {
     if (xhr.status < 200 || xhr.status >= 300) {
       onError(3);
@@ -76,10 +77,10 @@ function fetchForecasts(coords, onSuccess, onError) {
   xhr.send();
 }
 
-function fetchForecast(lat, lon, onSuccess, onError) {
+function fetchForecast(lat, lon, onSuccess, onError, timeoutMs) {
   fetchForecasts([{ lat: lat, lon: lon }], function (results) {
     onSuccess(results[0]);
-  }, onError);
+  }, onError, timeoutMs);
 }
 
 module.exports = {

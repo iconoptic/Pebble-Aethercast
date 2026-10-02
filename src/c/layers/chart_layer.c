@@ -76,8 +76,8 @@ void chart_layer_draw(GContext *ctx, GRect rect, const ChartSpec *spec) {
   }
 
   // Place-change ticks: a short mark at the top of the plot where the
-  // stitched history switched places. A step there is real (the user moved),
-  // and the tick is what separates it from weather. Missing mask = no ticks.
+  // stitched history switched places. A step there is real (first seen at a
+  // new place), and the tick is what separates it from weather. Missing mask = no ticks.
   if (spec->place_change) {
     int16_t tick_h = (int16_t)(rect.size.h / 8);
     if (tick_h < 5) {

@@ -103,27 +103,35 @@ function sendForecast(json, settings, opts) {
   sendDict(pack.packPayload(json, Math.floor(Date.now() / 1000), settings.unitSystem, opts));
 }
 
-function fetchSingle(lat, lon, settings) {
+function fetchSingle(lat, lon, settings, timeoutMs) {
   openmeteo.fetchForecast(lat, lon, function (json) {
     sendForecast(json, settings);
   }, function (errCode) {
     sendDict(pack.packError(errCode));
-  });
+  }, timeoutMs);
 }
 
 // The multi-place body could not be stitched. Send the current location's
 // forecast with no pressure/placeChange/delta3Tenths opts — the same dict
 // fetchSingle would build — and do not write a stitched cache. A second
-// HTTP request happens only when that object is not already in hand.
-function sendTrailFallback(plan, results, lat, lon, settings) {
+// HTTP request happens only when that object is not already in hand, and
+// only while the shared budget from the trail request still has ≥ 5 s left
+// (both requests together stay under ~25 s against the watch's 30 s watchdog).
+function sendTrailFallback(plan, results, lat, lon, settings, startedAt) {
   var current = trail.fallbackCurrent(plan, results);
   if (current) {
     console.log('AetherCast: trail stitch failed, sending the current location only');
     sendForecast(current, settings);
     return;
   }
+  var remainingMs = 25000 - (Date.now() - startedAt);
+  if (remainingMs < 5000) {
+    console.log('AetherCast: trail stitch failed, no time left to refetch');
+    sendDict(pack.packError(4));
+    return;
+  }
   console.log('AetherCast: trail stitch failed and the current result was unusable');
-  fetchSingle(lat, lon, settings);
+  fetchSingle(lat, lon, settings, remainingMs);
 }
 
 function fetchTrail(lat, lon, settings) {
@@ -141,11 +149,12 @@ function fetchTrail(lat, lon, settings) {
   }
   console.log('AetherCast: trail places=' + plan.places.length +
               ' distinct=' + plan.coords.length);
+  var startedAt = Date.now();
   openmeteo.fetchForecasts(plan.coords, function (results) {
     try {
       var integrated = trail.integrate(plan, results, trailStore.loadCache());
       if (!integrated || integrated.error) {
-        sendTrailFallback(plan, results, lat, lon, settings);
+        sendTrailFallback(plan, results, lat, lon, settings, startedAt);
         return;
       }
       trailStore.saveCache(integrated.cache);
@@ -157,7 +166,7 @@ function fetchTrail(lat, lon, settings) {
       sendForecast(integrated.currentJson, settings, opts);
     } catch (e) {
       console.log('AetherCast: trail stitch failed: ' + (e && e.message ? e.message : e));
-      sendTrailFallback(plan, results, lat, lon, settings);
+      sendTrailFallback(plan, results, lat, lon, settings, startedAt);
     }
   }, function (errCode) {
     sendDict(pack.packError(errCode));

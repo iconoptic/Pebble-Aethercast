@@ -139,7 +139,7 @@ sequenceDiagram
         P->>O: GET /v1/forecast?lat&lon&current&hourly=pressure_msl,temperature_2m,weather_code&past_hours=24&forecast_hours=12&daily=...,weather_code&forecast_days=4
         O-->>P: 200 JSON (~2.4 kB)
         P->>P: Normalise → metric ints, pack 36×int16/uint8 series + 4-day outlook
-        P->>C: AppMessage {MSG_TYPE:1, ...27 keys, PRESS_SERIES/TEMP_SERIES: 72 bytes each}
+        P->>C: AppMessage {MSG_TYPE:1, ...29 keys, PRESS_SERIES/TEMP_SERIES: 72 bytes each}
         C->>C: persist_write() ×2 (core payload + forecast) + redraw
         C-->>U: Fresh data, "now" dot green
     else Location denied / timeout / guard fires first
@@ -339,7 +339,7 @@ label with zero extra requests and zero reverse-geocoding dependency.
 
 ### 6.2 Wire format
 
-The whole payload is ~280 bytes across ~27 keys. Full key table in
+The whole payload is ~280 bytes across ~29 keys. Full key table in
 [docs/design/01-data-protocol.md](docs/design/01-data-protocol.md). Summary:
 
 | Key | Type | Notes |
