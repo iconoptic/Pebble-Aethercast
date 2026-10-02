@@ -19,6 +19,7 @@ run: $(SRC) shim.h ../src/c/lib/scale.h ../src/c/lib/moon.h ../src/c/lib/units.h
 .PHONY: js
 js:
 	NODE_PATH="$(CURDIR)/js" node pack.test.js
+	NODE_PATH="$(CURDIR)/js" node trail.test.js
 
 .PHONY: check
 check: run js

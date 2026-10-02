@@ -2,11 +2,13 @@
 //
 // UNIT_SYSTEM's messageKey matches a real watch-facing key (package.json /
 // message_keys.json) - src/pkjs/index.js forwards it to the watch on every
-// refresh (via pack.js). manualLocationEnabled/manualLat/manualLon are
-// JS-only: they never go over AppMessage, only into Clay's own localStorage,
-// per PLAN.md's "Clay manual lat/lon override" risk mitigation. index.js
-// handles showConfiguration/webviewclosed manually (autoHandleEvents: false)
-// so it can choose which settings actually reach the watch.
+// refresh (via pack.js). manualLocationEnabled/manualLat/manualLon,
+// pressureHistory, and the clear-history button are JS-only: they never go
+// over AppMessage, only into Clay's own localStorage (the button has no
+// messageKey at all — index.js's clayCustom closes the page with a one-shot
+// flag). index.js handles showConfiguration/webviewclosed manually
+// (autoHandleEvents: false) so it can choose which settings actually reach
+// the watch.
 module.exports = [
   {
     "type": "heading",
@@ -50,12 +52,29 @@ module.exports = [
         "messageKey": "manualLon",
         "label": "Longitude",
         "attributes": { "type": "number", "step": "0.0001", "placeholder": "e.g. -104.9903" }
+      },
+      {
+        "type": "radiogroup",
+        "messageKey": "pressureHistory",
+        "label": "Pressure history",
+        "defaultValue": 0,
+        "serializeValueAs": "integer",
+        "options": [
+          { "label": "Follow me", "value": 0 },
+          { "label": "This location only", "value": 1 }
+        ]
+      },
+      {
+        "type": "button",
+        "id": "clearLocationHistory",
+        "defaultValue": "Clear location history",
+        "description": "Deletes the location trail stored on this phone. The next refresh uses only where you are now."
       }
     ]
   },
   {
     "type": "text",
-    "defaultValue": "Manual location only changes where weather is fetched from - it is never sent anywhere except Open-Meteo."
+    "defaultValue": "Follow me reconstructs the past 24 h from places this phone has been. That trail stays on the phone. Open-Meteo receives coordinates only, the same as a normal refresh, and the watch receives weather — not the trail. Manual location and \"This location only\" use one fixed place and do not record a trail."
   },
   {
     "type": "submit",

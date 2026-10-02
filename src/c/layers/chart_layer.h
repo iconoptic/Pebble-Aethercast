@@ -17,6 +17,9 @@ typedef struct {
   bool show_grid;          // horizontal dotted gridlines at round values
   int16_t grid_step;       // ignored if show_grid is false
   int cursor_idx;          // -1 = no cursor marker
+  // Optional 5-byte mask, bit i set where the plotted place changed. NULL
+  // (or all zeros) draws nothing — temperature charts and pre-trail payloads.
+  const uint8_t *place_change;
 } ChartSpec;
 
 // Draws grid + tinted fill + solid past polyline + dashed forecast polyline +

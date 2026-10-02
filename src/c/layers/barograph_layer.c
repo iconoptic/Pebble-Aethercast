@@ -56,13 +56,9 @@ void barograph_draw_label(GContext *ctx, GRect rect, const WeatherPayload *paylo
     return;
   }
 
-  // press_series lives in a packed struct; copy out before passing its
-  // address to scale.c to avoid an unaligned-pointer warning/UB risk.
-  int16_t series[SCALE_N_SAMPLES];
-  memcpy(series, payload->press_series, sizeof(series));
-
-  uint8_t now_idx = prv_now_idx(payload);
-  int16_t delta3 = scale_trend_delta3(series, now_idx);
+  // press_delta3 is the current place's own 3 h change when a move falls
+  // inside the window; otherwise it matches scale_trend_delta3 of the series.
+  int16_t delta3 = payload->press_delta3;
   ScaleTrend trend = scale_trend_from_delta3(delta3);
 
   // Value text ("1000.0 hPa") is a bounded length, but the trend text can
@@ -101,7 +97,7 @@ void barograph_draw_plot(GContext *ctx, GRect rect, const WeatherPayload *payloa
   memcpy(series, payload->press_series, sizeof(series));
 
   uint8_t now_idx = prv_now_idx(payload);
-  int16_t delta3 = scale_trend_delta3(series, now_idx);
+  int16_t delta3 = payload->press_delta3;
   ScaleTrend trend = scale_trend_from_delta3(delta3);
 
   int16_t lo, hi;
@@ -116,6 +112,7 @@ void barograph_draw_plot(GContext *ctx, GRect rect, const WeatherPayload *payloa
     .show_grid = true,
     .grid_step = scale_grid_step(lo, hi),
     .cursor_idx = -1,
+    .place_change = payload->place_change,
   };
   chart_layer_draw(ctx, rect, &spec);
 }

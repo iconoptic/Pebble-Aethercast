@@ -6,9 +6,12 @@ The reason this app exists.
 
 36 samples of MSL pressure in tenths of hPa, hourly, from `PRESS_SERIES`:
 
-- indices `0 … 23` — the last 24 hours (index 23 is the most recent past hour)
-- index `24` = `PRESS_NOW_IDX` — now
-- indices `25 … 35` — the next 11 hours of forecast
+- indices `0 … 23` — the last 24 hours (index 23 is the most recent past hour).
+  With "Follow me" this is the pressure along the user's trail, one place per
+  hour, not 24 h at the current coordinates. "This location only" and a
+  manual location keep the whole series at one place.
+- index `24` = `PRESS_NOW_IDX` — now, always the current location
+- indices `25 … 35` — the next 11 hours of forecast, always the current location
 
 `PRESS_T0_UTC` is the epoch of index 0, so hour labels are derivable without
 sending any extra time data.
@@ -84,8 +87,16 @@ Draw order:
 4. **Forecast segment** (`i = 24 … 35`): 1 px, same trend colour, dashed by drawing
    every other sample-to-sample segment. Visually subordinate — it is a model, not
    a measurement.
-5. **Now divider** at `x(24)`: vertical 1 px line, `GColorWhite`, full plot height.
-6. **Current-value dot**: 3 px filled circle at `(x(24), y(series[24]))`.
+5. **Place-change ticks**, only when `PLACE_CHANGE` is present. Bit `i` of
+   that 5-byte little-endian mask marks a slot whose place differs from the
+   slot before it. Each set bit draws a short light-gray tick down from the
+   top of the plot (2 px wide, about an eighth of the plot height). A tick
+   that lands on the now-divider is nudged 3 px left so both stay visible.
+   A missing mask draws nothing, on the dashboard and on the detail screen.
+   The step itself is real — the user changed cities — and the tick is what
+   separates it from weather.
+6. **Now divider** at `x(24)`: vertical 1 px line, `GColorWhite`, full plot height.
+7. **Current-value dot**: 3 px filled circle at `(x(24), y(series[24]))`.
 
 ## Trend
 
@@ -94,6 +105,20 @@ Computed from the 3-hour change, which is the standard meteorological convention
 ```
 delta3 = series[NOW_IDX] − series[NOW_IDX − 3]      // tenths hPa
 ```
+
+That delta is wrong when the user changed place inside the window: the
+stitched step is a difference between two cities, and it will read as
+`FALLING FAST` or `RISING FAST`. The rule is:
+
+- Look at place-change bits `NOW_IDX−2`, `NOW_IDX−1`, and `NOW_IDX` (the
+  three steps that make up the 3 h delta).
+- If none of them is set, classify from the series, as above. The phone
+  omits `PRESS_DELTA3` and the watch computes it.
+- If any of them is set, classify from the **current place's own** hourly
+  pressure over the same two timestamps, sent as `PRESS_DELTA3`. The drawn
+  series still contains the step. The detail screen's `3h` figure uses this
+  same value. Its `6h` and `12h` figures stay on the drawn series, so a
+  drive inside those wider windows shows up there on purpose.
 
 | |Δ₃| (hPa) | Word | Colour |
 |---|---|---|
@@ -125,6 +150,8 @@ unitless, so adding inHg (`v * 0.02953 / 10` → `29.72 inHg`) or mmHg
 |---|---|
 | All 36 samples identical | Flat line dead centre, `STEADY`, no divide-by-zero |
 | Series contains a forward-filled gap | Renders as a flat run; no marker (JS already handled it) |
+| Place change between two hours | The step is drawn (it is the data) and a short tick marks that slot. Trend uses the current place if the change is inside the 3 h window |
+| `PLACE_CHANGE` absent | No ticks. Trend from the series. Identical to a single-place graph |
 | Extreme range (e.g. 40 hPa over 24 h) | 10% padding, curve stays inside the rect |
 | Only cached data | Plot is drawn unchanged from the cached series; staleness is signalled by the header dot and age, not by dimming the plot |
 | No payload at all | Empty plot rect outline in `GColorDarkGray`, no label row |

@@ -63,7 +63,9 @@ static void prv_draw(GContext *ctx, GRect bounds, void *context) {
                            bounds.size.w - 16, chart_h);
   int16_t lo, hi;
   scale_bounds(series, &lo, &hi);
-  int16_t delta3 = scale_trend_delta3(series, now_idx);
+  // Same rule as the dashboard label: a place change inside the 3 h window
+  // uses the current place's own delta, not the stitched step.
+  int16_t delta3 = payload->press_delta3;
   ScaleTrend trend = scale_trend_from_delta3(delta3);
   ChartSpec spec = {
     .series = series,
@@ -74,13 +76,16 @@ static void prv_draw(GContext *ctx, GRect bounds, void *context) {
     .show_grid = true,
     .grid_step = scale_grid_step(lo, hi),
     .cursor_idx = s_cursor_idx,
+    .place_change = payload->place_change,
   };
   chart_layer_draw(ctx, chart_rect, &spec);
 
   GRect delta_rect = GRect(bounds.origin.x + 6, (int16_t)(bounds.origin.y + title_h + chart_h),
                            bounds.size.w - 12, delta_h);
   char d3[12], d6[12], d12[12], line[48];
-  barograph_format_delta(prv_delta_over(series, now_idx, 3), d3, sizeof(d3));
+  // 3 h matches the trend word. 6 h and 12 h describe the drawn (stitched)
+  // series, so a drive inside those windows shows up there on purpose.
+  barograph_format_delta(delta3, d3, sizeof(d3));
   barograph_format_delta(prv_delta_over(series, now_idx, 6), d6, sizeof(d6));
   barograph_format_delta(prv_delta_over(series, now_idx, 12), d12, sizeof(d12));
   snprintf(line, sizeof(line), "3h %s  6h %s  12h %s", d3, d6, d12);

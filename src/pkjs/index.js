@@ -1,22 +1,52 @@
 // PebbleKit JS entry point: wait for REQUEST from the watch, geolocate,
 // fetch Open-Meteo, pack, send back. See docs/design/01-data-protocol.md.
+//
+// With "Pressure history: Follow me" (the default) each GPS fix is appended
+// to a phone-local trail and the past 24 h of PRESS_SERIES is stitched from
+// the places on that trail. The forecast half stays the current location.
+// Manual location and "This location only" take the original single-place path.
 
 var MessageKeys = require('message_keys');
 var openmeteo = require('./openmeteo');
 var pack = require('./pack');
+var trail = require('./trail');
 var Clay = require('@rebble/clay');
 var clayConfig = require('./config');
 
+// Runs inside the Clay config page, not in PKJS. The clear button has no
+// messageKey (it must not stick in clay-settings); this closes the page
+// with a one-shot flag that webviewclosed handles, alongside whatever else
+// the user had set.
+function clayCustom() {
+  var clayConfig = this;
+  clayConfig.on(clayConfig.EVENTS.AFTER_BUILD, function () {
+    var button = clayConfig.getItemById('clearLocationHistory');
+    if (!button) {
+      return;
+    }
+    button.on('click', function () {
+      var settings = clayConfig.serialize();
+      settings.clearLocationHistory = { value: true };
+      var returnTo = (typeof window !== 'undefined' && window.returnTo)
+        ? window.returnTo
+        : 'pebblejs://close#';
+      window.location.href = returnTo + encodeURIComponent(JSON.stringify(settings));
+    });
+  });
+}
+
 // autoHandleEvents: false - we decide which settings actually reach the
 // watch (only UNIT_SYSTEM, via a normal refresh) and keep the manual
-// location override JS-only. See src/pkjs/config.js and PLAN.md's Clay risk
-// mitigation.
-var clay = new Clay(clayConfig, null, { autoHandleEvents: false });
+// location override and the pressure-history trail JS-only. See
+// src/pkjs/config.js and PLAN.md's Clay risk mitigation.
+var clay = new Clay(clayConfig, clayCustom, { autoHandleEvents: false });
+var trailStore = trail.createStore(localStorage);
 
 // Dev-only: set to one of tools/fake_payload.js's PRESETS ('rising',
-// 'falling', 'flat', 'sawtooth', 'missing') to exercise the barograph
-// without geolocation/network, per PLAN.md's M4 exit criteria. Leave null
-// for normal operation - never ship a build with this set.
+// 'falling', 'flat', 'sawtooth', 'missing', 'trail') to exercise the
+// barograph without geolocation/network, per PLAN.md's M4 exit criteria.
+// 'trail' is Denver → Kansas City over 10 h, with place-change ticks.
+// Leave null for normal operation - never ship a build with this set.
 var FAKE_PAYLOAD_PRESET = null;
 var fakePayload = FAKE_PAYLOAD_PRESET ? require('../../tools/fake_payload') : null;
 // Dev-only, paired with FAKE_PAYLOAD_PRESET: overrides weather_code/is_day
@@ -48,7 +78,9 @@ function loadSettings() {
     unitSystem: raw.UNIT_SYSTEM === 1 ? 1 : UNITS_IMPERIAL,
     manualLocationEnabled: !!raw.manualLocationEnabled,
     manualLat: parseFloat(raw.manualLat),
-    manualLon: parseFloat(raw.manualLon)
+    manualLon: parseFloat(raw.manualLon),
+    // 0 = follow me (default), 1 = this location only.
+    pressureHistory: raw.pressureHistory === 1 ? 1 : 0,
   };
 }
 
@@ -67,6 +99,42 @@ function mapGeoError(err) {
                                              : 2 /* Location timeout / no fix */;
 }
 
+function sendForecast(json, settings, opts) {
+  sendDict(pack.packPayload(json, Math.floor(Date.now() / 1000), settings.unitSystem, opts));
+}
+
+function fetchSingle(lat, lon, settings) {
+  openmeteo.fetchForecast(lat, lon, function (json) {
+    sendForecast(json, settings);
+  }, function (errCode) {
+    sendDict(pack.packError(errCode));
+  });
+}
+
+function fetchTrail(lat, lon, settings) {
+  var now = Math.floor(Date.now() / 1000);
+  trailStore.recordFix(lat, lon, now);
+  var plan = trail.planFetch(trailStore.loadPlaces(), { lat: lat, lon: lon }, now, trailStore.loadCache());
+  console.log('AetherCast: trail places=' + plan.places.length +
+              ' distinct=' + plan.coords.length);
+  openmeteo.fetchForecasts(plan.coords, function (results) {
+    var integrated = trail.integrate(plan, results, trailStore.loadCache());
+    if (integrated.error) {
+      sendDict(pack.packError(integrated.error));
+      return;
+    }
+    trailStore.saveCache(integrated.cache);
+    var opts = { pressure: integrated.pressure };
+    if (integrated.placeChange) opts.placeChange = integrated.placeChange;
+    if (integrated.delta3Tenths !== null && integrated.delta3Tenths !== undefined) {
+      opts.delta3Tenths = integrated.delta3Tenths;
+    }
+    sendForecast(integrated.currentJson, settings, opts);
+  }, function (errCode) {
+    sendDict(pack.packError(errCode));
+  });
+}
+
 function fetchAndSend() {
   var settings = loadSettings();
 
@@ -75,17 +143,18 @@ function fetchAndSend() {
     var opts = {};
     if (FAKE_WX_CODE !== null) opts.wxCode = FAKE_WX_CODE;
     if (FAKE_IS_DAY !== null) opts.isDay = FAKE_IS_DAY;
-    sendDict(pack.packPayload(fakePayload.buildFakeJson(FAKE_PAYLOAD_PRESET, nowUtc, opts), nowUtc,
-                               settings.unitSystem));
+    sendForecast(fakePayload.buildFakeJson(FAKE_PAYLOAD_PRESET, nowUtc, opts), settings);
     return;
   }
 
   function onCoords(lat, lon) {
-    openmeteo.fetchForecast(lat, lon, function (json) {
-      sendDict(pack.packPayload(json, Math.floor(Date.now() / 1000), settings.unitSystem));
-    }, function (errCode) {
-      sendDict(pack.packError(errCode));
-    });
+    // Manual location and "this location only" are the original one-place
+    // fetch: no trail write, no extra coordinates, no place-change mask.
+    if (!trail.trailActive(settings)) {
+      fetchSingle(lat, lon, settings);
+      return;
+    }
+    fetchTrail(lat, lon, settings);
   }
 
   // Clay manual location override bypasses navigator.geolocation entirely -
@@ -146,8 +215,20 @@ Pebble.addEventListener('webviewclosed', function (e) {
   // convert: false - skip Clay's AppMessage conversion (which requires every
   // settings key to be a registered watch message key); getSettings() still
   // persists the flattened values to localStorage as a side effect.
-  clay.getSettings(e.response, false);
-  // Push the updated UNIT_SYSTEM (and/or manual location) to the watch now,
-  // rather than waiting for its next scheduled refresh.
+  var settings = clay.getSettings(e.response, false);
+  if (trail.configRequestsClear(settings)) {
+    trailStore.clear();
+    // The flag is one-shot. getSettings just wrote it into clay-settings;
+    // drop it so the next save doesn't look like another clear.
+    try {
+      var stored = JSON.parse(localStorage.getItem('clay-settings')) || {};
+      delete stored.clearLocationHistory;
+      localStorage.setItem('clay-settings', JSON.stringify(stored));
+    } catch (err) {
+      console.log('AetherCast: could not drop clear-history flag');
+    }
+  }
+  // Push the updated UNIT_SYSTEM (and/or location) to the watch now,
+  // rather than waiting for its next launch refresh.
   fetchAndSend();
 });
