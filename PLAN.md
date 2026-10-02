@@ -325,8 +325,11 @@ plus whenever the user asks for a refresh, so it stays orders of magnitude under
 
 `timezone` comes back as e.g. `America/Denver`. That string is only a fallback
 location label: the zone's representative city is not the town at the
-coordinates (`America/Chicago` covers Nebraska). The header uses a
-reverse-geocoded place name and falls back to the zone city when that misses.
+coordinates (`America/Chicago` covers Nebraska). On GPS, the header uses a
+BigDataCloud reverse-geocoded place name (coordinates rounded to ~1 km, only
+when the fix is more than 2 km from the last named place) and falls back to
+the zone city when that misses. Manual mode never calls BigDataCloud; the
+optional Clay location name is used instead, else the zone city.
 
 ### 6.2 Wire format
 

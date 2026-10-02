@@ -7,20 +7,71 @@ var HOURLY_SAMPLES = 36;
 var NOW_IDX = 24; // past_hours=24 -> sample 24 is the first forecast hour
 var OUTLOOK_DAYS = 4;
 
+// LOC_NAME's wire limit is 24 bytes including the NUL. The C side copies with
+// strncpy into char[24], so the JS side must cut at a UTF-8 character boundary
+// after at most 23 bytes — not UTF-16 code units.
+function utf8ByteLength(s) {
+  var n = 0;
+  for (var i = 0; i < s.length; i++) {
+    var c = s.charCodeAt(i);
+    if (c < 0x80) {
+      n += 1;
+    } else if (c < 0x800) {
+      n += 2;
+    } else if (c >= 0xD800 && c <= 0xDBFF) {
+      // Surrogate pair → one UTF-8 4-byte scalar.
+      n += 4;
+      i++;
+    } else {
+      n += 3;
+    }
+  }
+  return n;
+}
+
+function truncateUtf8(s, maxBytes) {
+  if (utf8ByteLength(s) <= maxBytes) return s;
+  var out = '';
+  for (var i = 0; i < s.length; i++) {
+    var c = s.charCodeAt(i);
+    var piece;
+    if (c >= 0xD800 && c <= 0xDBFF && i + 1 < s.length) {
+      piece = s.charAt(i) + s.charAt(i + 1);
+      i++;
+    } else {
+      piece = s.charAt(i);
+    }
+    if (utf8ByteLength(out + piece) > maxBytes) break;
+    out += piece;
+  }
+  return out;
+}
+
+// Fold accents when String.prototype.normalize exists (older PKJS may lack it).
+function foldAscii(s) {
+  if (typeof s.normalize !== 'function') return s;
+  try {
+    return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  } catch (e) {
+    return s;
+  }
+}
+
 // IANA zone names are one city for the whole zone: America/Denver covers
 // Mountain Time, America/Chicago covers Central Time (including Nebraska).
 // Using that as the place name is only a fallback for when reverse geocoding
-// misses. LOC_NAME's wire limit is 24 bytes including the NUL.
+// misses.
 function locNameFromTimezone(tz) {
   var parts = String(tz).split('/');
   var name = parts[parts.length - 1].replace(/_/g, ' ').toUpperCase();
-  return name.slice(0, 23);
+  return truncateUtf8(name, 23);
 }
 
 function formatLocName(placeName, timezone) {
   var raw = placeName == null ? '' : String(placeName).replace(/\0/g, '').trim();
   if (!raw) return locNameFromTimezone(timezone);
-  return raw.replace(/_/g, ' ').toUpperCase().slice(0, 23);
+  var folded = foldAscii(raw).replace(/_/g, ' ').toUpperCase();
+  return truncateUtf8(folded, 23);
 }
 
 // Open-Meteo's response shape isn't schema-validated by anything upstream of

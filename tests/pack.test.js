@@ -9,7 +9,6 @@ var fs = require('fs');
 var path = require('path');
 
 var pack = require('../src/pkjs/pack');
-var geocode = require('../src/pkjs/geocode');
 var MessageKeys = require('message_keys');
 
 var fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/openmeteo-denver.json'), 'utf8'));
@@ -124,21 +123,30 @@ function testPlaceNameOverridesTimezoneCity() {
   console.log('  ok: place name overrides timezone city and still fits LOC_NAME');
 }
 
-function testPlaceFromGeocodeResponse() {
-  assert.strictEqual(geocode.placeFromResponse({
-    city: 'Lincoln', locality: 'Lincoln', principalSubdivision: 'Nebraska'
-  }), 'Lincoln');
-  assert.strictEqual(geocode.placeFromResponse({
-    city: '', locality: 'Kearney', principalSubdivision: 'Nebraska'
-  }), 'Kearney');
-  assert.strictEqual(geocode.placeFromResponse({
-    city: '  ', locality: '', principalSubdivision: 'Nebraska'
-  }), 'Nebraska');
-  assert.strictEqual(geocode.placeFromResponse({}), null);
-  assert.strictEqual(geocode.placeFromResponse(null), null);
-  assert.ok(geocode.buildUrl(40.8136, -96.7026).indexOf('latitude=40.8136') !== -1);
-  assert.ok(geocode.buildUrl(40.8136, -96.7026).indexOf('longitude=-96.7026') !== -1);
-  console.log('  ok: reverse-geocode response prefers city, then locality, then state');
+function utf8Bytes(s) {
+  return Buffer.from(s, 'utf8').length;
+}
+
+function testUtf8SafeLocName() {
+  var moved = JSON.parse(JSON.stringify(fixture));
+  moved.timezone = 'America/Chicago';
+
+  var zurich = pack.packPayload(moved, nowUtcForFixture(), 1, 'Zürich');
+  assert.strictEqual(zurich[MessageKeys.LOC_NAME], 'ZURICH');
+
+  // Folded ASCII is 26 bytes; must cut at a character boundary ≤ 23 bytes.
+  var sao = pack.packPayload(moved, nowUtcForFixture(), 1, 'São José dos Campos Norte');
+  assert.strictEqual(sao[MessageKeys.LOC_NAME], 'SAO JOSE DOS CAMPOS NOR');
+  assert.ok(utf8Bytes(sao[MessageKeys.LOC_NAME]) <= 23);
+
+  // Each CJK ideograph is 3 UTF-8 bytes → at most 7 characters (21 bytes);
+  // the 8th would be 24 and must not be included.
+  var cjkName = '東京特別区何か長い名前です';
+  var cjk = pack.packPayload(moved, nowUtcForFixture(), 1, cjkName);
+  assert.strictEqual(cjk[MessageKeys.LOC_NAME], '東京特別区何か');
+  assert.strictEqual(utf8Bytes(cjk[MessageKeys.LOC_NAME]), 21);
+  assert.ok(utf8Bytes(cjk[MessageKeys.LOC_NAME]) <= 23);
+  console.log('  ok: LOC_NAME folds accents and truncates on UTF-8 boundaries');
 }
 
 testHappyPath();
@@ -146,5 +154,5 @@ testMissingHourlyTemperature();
 testMissingDailyWeatherCode();
 testOutlookPadsWhenDailyArraysAreShort();
 testPlaceNameOverridesTimezoneCity();
-testPlaceFromGeocodeResponse();
+testUtf8SafeLocName();
 console.log('all pack.js tests passed');

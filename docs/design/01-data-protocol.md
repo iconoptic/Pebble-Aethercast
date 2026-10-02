@@ -84,10 +84,14 @@ Confirmed facts:
 - `timezone` is the IANA zone, whose last segment is one representative city
   for the whole zone (`America/Denver` → `DENVER`, `America/Chicago` → `CHICAGO`).
   That is not the town at `latitude`/`longitude`: most of Nebraska is
-  `America/Chicago`. The watch header uses a reverse-geocoded place name
-  (BigDataCloud, client-side, no key) and falls back to that zone city only
-  when the lookup misses. The fallback is uppercase, `_` replaced with space,
-  truncated to 23 characters.
+  `America/Chicago`. On GPS fixes the watch header uses a reverse-geocoded
+  place name (BigDataCloud client-side endpoint, no key; coordinates rounded
+  to ~1 km and only sent when the fix is more than 2 km from the last named
+  place — see [vendor notes](../vendor/bigdatacloud-reverse-geocode-client.md)).
+  Manual mode never calls that endpoint: the optional Clay location name is
+  used, else the zone city. Labels are uppercased (accents folded to ASCII when
+  `String.normalize` exists), `_` replaced with space, and truncated to at most
+  23 **bytes** of UTF-8 at a character boundary.
 
 ### Picking "today" from `daily`
 
@@ -128,7 +132,7 @@ dictionary, not separate messages.
 | `SUNRISE_UTC` | int32 | epoch seconds | |
 | `SUNSET_UTC` | int32 | epoch seconds | |
 | `UPDATED_UTC` | int32 | epoch seconds | staleness reference |
-| `LOC_NAME` | cstring | ≤ 24 bytes incl. NUL | reverse-geocoded place; timezone city if that lookup misses |
+| `LOC_NAME` | cstring | ≤ 24 bytes incl. NUL | reverse-geocoded / manual place; timezone city if that misses; UTF-8-safe ≤ 23 bytes |
 | `LAT_SIGN` | int8 | +1 / −1 | southern hemisphere moon mirroring |
 | `ERR_CODE` | uint8 | only when `MSG_TYPE=2` | |
 
