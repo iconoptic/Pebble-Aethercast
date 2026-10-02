@@ -1,5 +1,7 @@
 #include "comm.h"
 #include "model.h"
+#include "sample.h"
+#include "wire.h"
 
 // Sized per docs/design/01-data-protocol.md: ~280 bytes of payload values
 // (core + forecast fields) plus per-tuple dictionary overhead inbound, a
@@ -38,6 +40,13 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
   if (dict_find(iter, MESSAGE_KEY_PKJS_READY)) {
     comm_request_refresh();
     return;
+  }
+  // Present on every weather and error dict. -1 means an older phone build
+  // that doesn't know about background sampling; leave the persisted
+  // interval alone in that case. 0 is a real "off".
+  int32_t hours = wire_read_int32(iter, MESSAGE_KEY_SAMPLE_HRS, -1);
+  if (hours >= 0) {
+    sample_set_hours((int)hours);
   }
   model_apply_inbox(iter);
 }

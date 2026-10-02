@@ -62,7 +62,8 @@
       "DAILY_CODE",
       "DAILY_T0_UTC",
       "PLACE_CHANGE",
-      "PRESS_DELTA3"
+      "PRESS_DELTA3",
+      "SAMPLE_HRS"
     ],
     "resources": {
       "media": []

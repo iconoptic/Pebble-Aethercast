@@ -8,9 +8,12 @@ CFLAGS ?= -std=c11 -Wall -Wextra -g
 LDLIBS = -lm
 
 SRC = ../src/c/lib/scale.c ../src/c/lib/moon.c ../src/c/lib/units.c ../src/c/lib/wmo.c \
-      test_scale.c test_moon.c test_units.c test_wmo.c test_place_change.c test_main.c
+      ../src/c/sample_schedule.c \
+      test_scale.c test_moon.c test_units.c test_wmo.c test_place_change.c \
+      test_sample_schedule.c test_main.c
 
-run: $(SRC) shim.h ../src/c/lib/scale.h ../src/c/lib/moon.h ../src/c/lib/units.h ../src/c/lib/wmo.h
+run: $(SRC) shim.h ../src/c/lib/scale.h ../src/c/lib/moon.h ../src/c/lib/units.h ../src/c/lib/wmo.h \
+    ../src/c/sample_schedule.h
 	$(CC) $(CFLAGS) -o run $(SRC) $(LDLIBS)
 
 # JS-side tests for src/pkjs/pack.js - no Pebble SDK or `pebble build`
@@ -20,6 +23,7 @@ run: $(SRC) shim.h ../src/c/lib/scale.h ../src/c/lib/moon.h ../src/c/lib/units.h
 js:
 	NODE_PATH="$(CURDIR)/js" node pack.test.js
 	NODE_PATH="$(CURDIR)/js" node trail.test.js
+	node sample_hours.test.js
 
 .PHONY: check
 check: run js

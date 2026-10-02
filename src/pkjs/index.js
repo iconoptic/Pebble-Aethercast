@@ -10,6 +10,7 @@ var MessageKeys = require('message_keys');
 var openmeteo = require('./openmeteo');
 var pack = require('./pack');
 var trail = require('./trail');
+var sampleHours = require('./sample_hours');
 var Clay = require('@rebble/clay');
 var clayConfig = require('./config');
 
@@ -36,8 +37,9 @@ function clayCustom() {
 }
 
 // autoHandleEvents: false - we decide which settings actually reach the
-// watch (only UNIT_SYSTEM, via a normal refresh) and keep the manual
-// location override and the pressure-history trail JS-only. See
+// watch. UNIT_SYSTEM rides the weather dict. sampleHours is forwarded as
+// SAMPLE_HRS on every weather and error dict so the watch can arm its
+// wakeup; the trail and the manual-location keys stay JS-only. See
 // src/pkjs/config.js and PLAN.md's Clay risk mitigation.
 var clay = new Clay(clayConfig, clayCustom, { autoHandleEvents: false });
 var trailStore = trail.createStore(localStorage);
@@ -81,10 +83,16 @@ function loadSettings() {
     manualLon: parseFloat(raw.manualLon),
     // 0 = follow me (default), 1 = this location only.
     pressureHistory: raw.pressureHistory === 1 ? 1 : 0,
+    // 0 = off (default), else 1 / 2 / 4 hours between wakeup samples.
+    sampleHours: sampleHours.normalizeSampleHours(raw.sampleHours),
   };
 }
 
 function sendDict(dict) {
+  // PKJS_READY has no MSG_TYPE and must not grow a sample interval.
+  if (dict && (dict[MessageKeys.MSG_TYPE] === 1 || dict[MessageKeys.MSG_TYPE] === 2)) {
+    dict[MessageKeys.SAMPLE_HRS] = loadSettings().sampleHours;
+  }
   Pebble.sendAppMessage(dict, function () {
     console.log('AetherCast: sent ' + JSON.stringify(dict));
   }, function (e) {

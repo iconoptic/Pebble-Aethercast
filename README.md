@@ -27,6 +27,9 @@ it never goes to a server of ours. Open-Meteo receives coordinates, which it alr
 fix; the watch receives the weather and a bit mask of *when* the place
 changed, not the coordinates. "This location only", manual location, and
 "Clear location history" in settings stop or delete that trail.
+**Background location** (off unless you turn it on) is the same refresh on a
+timer: the watch opens, the phone records a fix, and the watch closes. The
+trail still stays on the phone.
 
 ## Why this exists
 

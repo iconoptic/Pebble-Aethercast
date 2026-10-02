@@ -199,6 +199,7 @@ dictionary, not separate messages.
 | `LAT_SIGN` | int8 | +1 / −1 | southern hemisphere moon mirroring |
 | `PLACE_CHANGE` | bytes[5] | 36 bits, little-endian | **optional.** Bit `i` is set when slot `i`'s place differs from slot `i-1`. Absent (or the wrong length) means no moves: the watch draws no ticks. All-zero masks are not sent. |
 | `PRESS_DELTA3` | int16 | tenths hPa | **optional.** Sent only when a place change falls inside the 3 h trend window. It is the current location's own `pressure[now] − pressure[now−3]`, so the step is not classified as weather. Absent means "compute it from `PRESS_SERIES`", which is what a single-place series already is. `0` is a real override and is sent. |
+| `SAMPLE_HRS` | int32 | 0, 1, 2, or 4 | **optional side channel**, on both `MSG_TYPE` 1 and 2. Hours between opt-in background location samples. `0` is off (the default). Absent means an older phone build: the watch keeps whatever interval it already stored. Not part of `WeatherPayload` — the watch persists it under its own key. See [docs/research/01-background-refresh.md](../research/01-background-refresh.md). |
 | `ERR_CODE` | uint8 | only when `MSG_TYPE=2` | |
 
 Total ≈ 280 bytes of values (core + forecast fields) plus dictionary overhead
