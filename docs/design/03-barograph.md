@@ -78,14 +78,78 @@ Draw order:
    tint of the trend colour (each RGB channel of the packed `.argb` darkened one
    step). Gives the graph weight on a 200 px display without needing
    anti-aliasing.
-3. **Past segment** (`i = 0 … 24`): solid polyline in the trend colour, 2 px on
+3. **Past segment** (`i = 0 … now_idx`): solid polyline in the trend colour, 2 px on
    colour platforms. On B/W platforms the width itself carries the trend — 1 px
    for `STEADY`, 2 px for any rise or fall — since there is no hue to use.
-4. **Forecast segment** (`i = 24 … 35`): 1 px, same trend colour, dashed by drawing
+   When the divider is omitted (`now_idx < 0`) every sample is past.
+4. **Forecast segment** (`i = now_idx … 35`): 1 px, same trend colour, dashed by drawing
    every other sample-to-sample segment. Visually subordinate — it is a model, not
-   a measurement.
-5. **Now divider** at `x(24)`: vertical 1 px line, `GColorWhite`, full plot height.
-6. **Current-value dot**: 3 px filled circle at `(x(24), y(series[24]))`.
+   a measurement. Empty when the divider is omitted or sits on the last sample.
+5. **Now divider** at `x(now_idx)`: vertical 1 px line, `GColorWhite`, full plot height.
+   On a live payload `now_idx` is `PRESS_NOW_IDX` (24). After a failed refresh it
+   is the re-anchored index below, and it is omitted entirely when that index
+   falls off the end of the series.
+6. **Current-value dot**: 3 px filled circle at `(x(now_idx), y(series[now_idx]))`.
+   Omitted together with the divider.
+
+## Stale cache on launch, and a failed refresh
+
+The cached series is what the watch can draw before the phone answers. The
+now-divider in that cache is wherever it was at the last fetch (`PRESS_NOW_IDX`,
+normally 24), not wherever the wall clock is now. Drawn unchanged, a cache from
+this morning looks like a live barograph.
+
+The divider is one hourly sample wide. It is on the wrong hour once
+
+```
+now - (press_t0_utc + press_now_idx * 3600) >= MODEL_GRAPH_MISLEADING_AFTER_S
+```
+
+`MODEL_GRAPH_MISLEADING_AFTER_S` is 3600, one `SCALE_SAMPLE_PERIOD_S`. Anything
+younger still lands on the correct sample, so it renders immediately — that is
+the common case, opening the app again a few minutes later. The 20-minute
+header-dot threshold (`MODEL_STALE_AFTER_S`) is deliberately shorter: the dot
+may already be yellow while the curve is still honest.
+
+While that inequality holds **and** a refresh is in flight
+(`model_is_refreshing()`), the dashboard plot zone and the barograph detail
+chart draw a placeholder instead of the curve: a dotted midline in the same
+3 px cadence as the grid, and the word `UPDATING`. On black-and-white platforms
+both are white; the word is what carries it, not the colour. The pressure value
+and the 3 h trend word are omitted for the same reason. They are computed from
+the recorded now-sample (`press_hpa10` is the reading at fetch time; the trend
+is `series[now] − series[now−3]` there), so printing them next to the
+placeholder would still assert the stale hour. `model_note_request_sent()`
+notifies listeners, so the placeholder replaces the curve as soon as the launch
+`REQUEST` goes out, not only when the payload comes back.
+
+If the refresh ends in `MODEL_STATUS_ERROR` (no phone, no fix, watchdog, …) the
+placeholder comes down and the cached curve is shown. The divider is moved to
+the sample that actually contains the wall clock:
+
+```
+now_idx = (now - press_t0_utc) / 3600
+```
+
+implemented by `scale_reanchor_now_idx()`:
+
+| `now` vs the series | Divider |
+|---|---|
+| `now < press_t0_utc` (clock skew) | Clamped to sample 0 |
+| Inside the series | That sample. Past/forecast split follows it, so hours that were forecast at fetch time and are now behind the divider draw solid |
+| At or past the end of sample 35 | No divider and no current-value dot. The whole curve draws as the past segment |
+
+The series holds 12 h of forecast past the original now (index 24 through 35),
+so a cache up to 11 h old still places the divider on a real sample, and it
+stays on sample 35 until the clock reaches 12 h past the recorded now. Past
+that, pinning the divider on sample 35 would call a forecast hour "now" when
+the clock is already beyond it, so the divider is left off and the red header
+text (`NO PHONE`, `NO FIX`, …) is the explanation. The label then prints the
+last sample and the 3 h trend into it, which is the newest hour the cache has,
+not a claim about the present.
+
+A live payload (`MODEL_GRAPH_LIVE`) is unchanged: divider at `press_now_idx`,
+label value `press_hpa10`.
 
 ## Trend
 
@@ -126,7 +190,10 @@ unitless, so adding inHg (`v * 0.02953 / 10` → `29.72 inHg`) or mmHg
 | All 36 samples identical | Flat line dead centre, `STEADY`, no divide-by-zero |
 | Series contains a forward-filled gap | Renders as a flat run; no marker (JS already handled it) |
 | Extreme range (e.g. 40 hPa over 24 h) | 10% padding, curve stays inside the rect |
-| Only cached data | Plot is drawn unchanged from the cached series; staleness is signalled by the header dot and age, not by dimming the plot |
+| Cached data, divider still on the right hour | Plot is drawn from the cached series. Staleness is the header dot and age. A cache younger than one sample (`MODEL_GRAPH_MISLEADING_AFTER_S`) always takes this path, including while a refresh is in flight |
+| Cached now is ≥ 1 sample behind, refresh in flight | Loading placeholder in the plot zone (dotted midline + `UPDATING`). The value/trend label is omitted — it is computed from that same sample |
+| Refresh failed, series still covers now | Cached curve, now-divider re-anchored (see below). Label value is the sample under the divider, so it matches the dot |
+| Refresh failed, series does not cover now | Whole curve drawn as the past segment, no now-divider and no current-value dot. Label shows the last sample. The header's red `model_error_text()` says why |
 | No payload at all | Empty plot rect outline in `GColorDarkGray`, no label row |
 | `PRESS_NOW_IDX` out of range | Clamped to `SCALE_N_SAMPLES - 1` before use |
 | Non-`emery` platform | Plot rect derived from unobstructed bounds; sample count unchanged |
@@ -173,3 +240,7 @@ Assertions:
 - `x` is non-decreasing
 - flat input → all `y` equal, and equal to the vertical centre ±1
 - `MIN_SPAN` clamp engages exactly when `hi_raw − lo_raw < 80`
+- `scale_reanchor_now_idx`: a fresh cache (now on sample 24) stays at 24,
+  including 59 minutes into that hour; 3 h later is 27; 11 h later is 35;
+  12 h later (and anything past the last sample) is −1 so the divider is
+  omitted; `now < press_t0_utc` clamps to 0

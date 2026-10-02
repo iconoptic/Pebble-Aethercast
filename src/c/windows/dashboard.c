@@ -150,19 +150,29 @@ static void prv_root_update_proc(Layer *layer, GContext *ctx) {
   moon_layer_draw(ctx, cond_rect, payload ? payload->lat_sign : 1, compact);
 
   GRect blabel_rect = prv_zone(bounds, &y, ZONE_BLABEL_PERMILLE);
-  barograph_draw_label(ctx, GRect(blabel_rect.origin.x + 4, blabel_rect.origin.y,
-                                  blabel_rect.size.w - 8, blabel_rect.size.h),
-                        model_get_payload());
-
   GRect plot_rect = prv_zone(bounds, &y, ZONE_PLOT_PERMILLE);
   // Combined blabel+plot rect is what the barograph detail animates out of,
   // so the pressure value/trend line the user was just looking at ends up
   // roughly where the expanded chart's top edge lands.
   s_zone_baro = GRect(blabel_rect.origin.x, blabel_rect.origin.y, blabel_rect.size.w,
                       (int16_t)(blabel_rect.size.h + plot_rect.size.h));
-  barograph_draw_plot(ctx, GRect(plot_rect.origin.x + 8, plot_rect.origin.y,
-                                 plot_rect.size.w - 16, plot_rect.size.h),
-                       model_get_payload());
+
+  ModelGraphView graph;
+  model_get_graph_view(&graph);
+  GRect plot_inset = GRect(plot_rect.origin.x + 8, plot_rect.origin.y,
+                           plot_rect.size.w - 16, plot_rect.size.h);
+  if (graph.mode == MODEL_GRAPH_LOADING) {
+    // The hPa value and the 3h trend are both taken from the recorded
+    // now-sample. Leave the label row blank rather than print them next
+    // to a placeholder that exists to say that sample is not "now".
+    barograph_draw_loading(ctx, plot_inset);
+  } else {
+    bool reanchored = graph.mode == MODEL_GRAPH_REANCHORED;
+    GRect label_inset = GRect(blabel_rect.origin.x + 4, blabel_rect.origin.y,
+                              blabel_rect.size.w - 8, blabel_rect.size.h);
+    barograph_draw_label(ctx, label_inset, payload, graph.now_idx, reanchored);
+    barograph_draw_plot(ctx, plot_inset, payload, graph.now_idx);
+  }
 
   GRect footer_rect = prv_zone(bounds, &y, ZONE_FOOTER_PERMILLE);
   footer_layer_draw(ctx, GRect(footer_rect.origin.x + 4, footer_rect.origin.y,
@@ -170,10 +180,23 @@ static void prv_root_update_proc(Layer *layer, GContext *ctx) {
                      payload);
 }
 
-static void prv_model_changed(void) {
+static void prv_mark_dirty(void) {
   if (s_content_layer) {
     layer_mark_dirty(s_content_layer);
   }
+}
+
+static void prv_start_refresh_indicator(void);
+
+static void prv_model_changed(void) {
+  if (model_is_refreshing()) {
+    // PKJS_READY starts the launch refresh without a click. Arm the
+    // header dots here so that path cycles the same way SELECT does.
+    // The indicator tick marks dirty directly — it must not re-enter
+    // here, or it would schedule a second timer.
+    prv_start_refresh_indicator();
+  }
+  prv_mark_dirty();
 }
 
 static void prv_refresh_indicator_tick(void *data) {
@@ -182,7 +205,7 @@ static void prv_refresh_indicator_tick(void *data) {
     return;
   }
   s_refresh_dots++;
-  prv_model_changed();
+  prv_mark_dirty();
   s_refresh_indicator_timer = app_timer_register(REFRESH_INDICATOR_MS, prv_refresh_indicator_tick, NULL);
 }
 
@@ -300,7 +323,7 @@ static void prv_window_appear(Window *window) {
   // Only subscribe while Dashboard is the visible window - e.g. not while
   // a detail screen is pushed on top - per docs/design/04-ui-layout.md's
   // battery guidance ("a real cost on a watch rated for 30 days").
-  model_set_listener(prv_model_changed);
+  model_add_listener(prv_model_changed);
   tick_timer_service_subscribe(MINUTE_UNIT, prv_minute_tick);
   if (model_is_refreshing()) {
     // A request from before a detail screen was pushed may still be
@@ -312,7 +335,7 @@ static void prv_window_appear(Window *window) {
 
 static void prv_window_disappear(Window *window) {
   tick_timer_service_unsubscribe();
-  model_set_listener(NULL);
+  model_remove_listener(prv_model_changed);
   if (s_refresh_indicator_timer) {
     app_timer_cancel(s_refresh_indicator_timer);
     s_refresh_indicator_timer = NULL;

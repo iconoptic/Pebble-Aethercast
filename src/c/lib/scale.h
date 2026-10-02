@@ -8,6 +8,10 @@
 #define SCALE_N_SAMPLES 36
 #define SCALE_MIN_SPAN 80 // tenths hPa (8.0 hPa) - docs/design/03-barograph.md
 #define SCALE_MIN_SPAN_TEMP 50 // tenths degC (5.0 degC) - keeps a calm day off a full-scale flat line
+// PRESS_SERIES is hourly. model.h's MODEL_GRAPH_MISLEADING_AFTER_S is one of
+// these periods: the now-divider is on the wrong hour once it has slipped by
+// a full sample. model.c static-asserts the two constants match.
+#define SCALE_SAMPLE_PERIOD_S 3600
 
 typedef struct {
   int16_t x;
@@ -53,6 +57,22 @@ int16_t scale_grid_step_ex(int16_t lo, int16_t hi, const int16_t *steps, int cou
 
 // scale_grid_step_ex with candidates {20, 50, 100} tenths hPa.
 int16_t scale_grid_step(int16_t lo, int16_t hi);
+
+// Hourly sample that contains `now_utc` in a series whose sample 0 starts
+// at `t0_utc`.
+//
+// Returns 0 when `now_utc` is before sample 0 (clock skew: clamp to the
+// start of the series). Returns -1 when `now_utc` is at or after the end
+// of the last sample, so the caller omits the now-divider — the series no
+// longer covers the present, and pinning the divider on the last forecast
+// hour would claim that hour is "now". Otherwise an index in
+// [0, SCALE_N_SAMPLES).
+int scale_reanchor_now_idx(int32_t t0_utc, int32_t now_utc);
+
+// Seconds by which `now_utc` is ahead of sample `now_idx`
+// (t0_utc + now_idx * SCALE_SAMPLE_PERIOD_S). Negative when the clock is
+// behind that sample. Compared with MODEL_GRAPH_MISLEADING_AFTER_S.
+int32_t scale_recorded_now_lag_s(int32_t t0_utc, uint8_t now_idx, int32_t now_utc);
 
 // 3-hour pressure delta (tenths hPa) ending at now_idx, the standard
 // meteorological trend convention. Returns 0 if now_idx < 3.

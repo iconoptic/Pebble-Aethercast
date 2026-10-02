@@ -163,6 +163,48 @@ static void test_min_span_temp(void) {
   prv_check_x_mapping(pts, kRect);
 }
 
+// Re-anchor math for a stale barograph. A fresh fetch's "now" is sample 24
+// (PRESS_NOW_IDX): 24 h of history behind it and 11 h of forecast ahead
+// (samples 25..35). MODEL_GRAPH_MISLEADING_AFTER_S in model.h is one
+// sample period; this file cannot include model.h (it pulls in pebble.h),
+// so the equality is also static-asserted from model.c.
+static void test_reanchor_now_idx(void) {
+  const int32_t t0 = 1700000000;
+  const int32_t hour = SCALE_SAMPLE_PERIOD_S;
+  const int recorded = 24;
+  assert(hour == 3600);
+  assert(recorded + 11 == SCALE_N_SAMPLES - 1);
+
+  // Fresh cache: the wall clock is still on the recorded now sample,
+  // including 59 minutes later.
+  assert(scale_reanchor_now_idx(t0, t0 + recorded * hour) == recorded);
+  assert(scale_reanchor_now_idx(t0, t0 + recorded * hour + hour - 1) == recorded);
+
+  // 3 h old: the divider moves three samples into what was forecast.
+  assert(scale_reanchor_now_idx(t0, t0 + (recorded + 3) * hour) == recorded + 3);
+
+  // 11 h old: last sample. The original forecast still covers "now",
+  // through the final second of that hour.
+  assert(scale_reanchor_now_idx(t0, t0 + (recorded + 11) * hour) == SCALE_N_SAMPLES - 1);
+  assert(scale_reanchor_now_idx(t0, t0 + (recorded + 11) * hour + hour - 1) == SCALE_N_SAMPLES - 1);
+
+  // Older than the series: the first instant with no sample, and well past it.
+  // -1 tells the caller to omit the now-divider.
+  assert(scale_reanchor_now_idx(t0, t0 + (recorded + 12) * hour) == -1);
+  assert(scale_reanchor_now_idx(t0, t0 + 100 * hour) == -1);
+
+  // Clock skew: now before sample 0 clamps to the start of the series.
+  assert(scale_reanchor_now_idx(t0, t0 - 1) == 0);
+  assert(scale_reanchor_now_idx(t0, t0 - hour) == 0);
+  assert(scale_reanchor_now_idx(t0, t0) == 0);
+
+  // Placeholder threshold is one full sample of lag, not a second less.
+  assert(scale_recorded_now_lag_s(t0, (uint8_t)recorded, t0 + recorded * hour) == 0);
+  assert(scale_recorded_now_lag_s(t0, (uint8_t)recorded, t0 + recorded * hour + hour - 1) == hour - 1);
+  assert(scale_recorded_now_lag_s(t0, (uint8_t)recorded, t0 + (recorded + 3) * hour) == 3 * hour);
+  assert(scale_recorded_now_lag_s(t0, (uint8_t)recorded, t0 + recorded * hour - 5) == -5);
+}
+
 void test_scale_run(void) {
   test_presets();
   test_random_series();
@@ -172,4 +214,5 @@ void test_scale_run(void) {
   test_trend();
   test_ex_variants_match_wrappers();
   test_min_span_temp();
+  test_reanchor_now_idx();
 }

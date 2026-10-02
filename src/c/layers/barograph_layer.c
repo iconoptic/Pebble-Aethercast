@@ -47,11 +47,26 @@ uint8_t barograph_trend_width(ScaleTrend t) {
 #endif
 }
 
-static uint8_t prv_now_idx(const WeatherPayload *payload) {
-  return payload->press_now_idx < SCALE_N_SAMPLES ? payload->press_now_idx : SCALE_N_SAMPLES - 1;
+// -1 keeps the "no divider" sentinel. Anything else is clamped into the series.
+static int prv_clamp_now_idx(int now_idx) {
+  if (now_idx < 0) {
+    return -1;
+  }
+  if (now_idx >= SCALE_N_SAMPLES) {
+    return SCALE_N_SAMPLES - 1;
+  }
+  return now_idx;
 }
 
-void barograph_draw_label(GContext *ctx, GRect rect, const WeatherPayload *payload) {
+// Trend (and, when the divider is omitted, the printed value) needs a real
+// sample. The last hour is the newest one the cache still has.
+static uint8_t prv_trend_idx(int now_idx) {
+  int clamped = prv_clamp_now_idx(now_idx);
+  return clamped < 0 ? (uint8_t)(SCALE_N_SAMPLES - 1) : (uint8_t)clamped;
+}
+
+void barograph_draw_label(GContext *ctx, GRect rect, const WeatherPayload *payload,
+                          int now_idx, bool value_from_sample) {
   if (!payload) {
     return;
   }
@@ -61,9 +76,10 @@ void barograph_draw_label(GContext *ctx, GRect rect, const WeatherPayload *paylo
   int16_t series[SCALE_N_SAMPLES];
   memcpy(series, payload->press_series, sizeof(series));
 
-  uint8_t now_idx = prv_now_idx(payload);
-  int16_t delta3 = scale_trend_delta3(series, now_idx);
+  uint8_t trend_idx = prv_trend_idx(now_idx);
+  int16_t delta3 = scale_trend_delta3(series, trend_idx);
   ScaleTrend trend = scale_trend_from_delta3(delta3);
+  int16_t value = value_from_sample ? series[trend_idx] : payload->press_hpa10;
 
   // Value text ("1000.0 hPa") is a bounded length, but the trend text can
   // run to "-99.9/3h FALLING FAST" - give it most of the row so two-digit
@@ -71,7 +87,7 @@ void barograph_draw_label(GContext *ctx, GRect rect, const WeatherPayload *paylo
   int16_t value_w = rect.size.w * 2 / 5;
 
   char value_buf[16];
-  barograph_format_hpa(payload->press_hpa10, value_buf, sizeof(value_buf));
+  barograph_format_hpa(value, value_buf, sizeof(value_buf));
   graphics_context_set_text_color(ctx, GColorWhite);
   GRect value_rect = GRect(rect.origin.x, rect.origin.y, value_w, rect.size.h);
   graphics_draw_text(ctx, value_buf, fonts_get_system_font(FONT_KEY_GOTHIC_14), value_rect,
@@ -87,7 +103,31 @@ void barograph_draw_label(GContext *ctx, GRect rect, const WeatherPayload *paylo
                       GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
 }
 
-void barograph_draw_plot(GContext *ctx, GRect rect, const WeatherPayload *payload) {
+void barograph_draw_loading(GContext *ctx, GRect rect) {
+  if (rect.size.w <= 0 || rect.size.h <= 0) {
+    return;
+  }
+
+  // Same 3px dotted cadence as the chart grid, through the vertical middle
+  // of whatever rect the caller already computed from unobstructed bounds.
+  int16_t mid_y = (int16_t)(rect.origin.y + rect.size.h / 2);
+  graphics_context_set_stroke_color(ctx, PBL_IF_COLOR_ELSE(GColorDarkGray, GColorWhite));
+  for (int16_t x = rect.origin.x; x < rect.origin.x + rect.size.w; x += 3) {
+    graphics_draw_pixel(ctx, GPoint(x, mid_y));
+  }
+
+  int16_t band_h = (int16_t)(rect.size.h / 3);
+  if (band_h < 1) {
+    return;
+  }
+  GRect text_rect = GRect(rect.origin.x, (int16_t)(rect.origin.y + (rect.size.h - band_h) / 2),
+                          rect.size.w, band_h);
+  graphics_context_set_text_color(ctx, PBL_IF_COLOR_ELSE(GColorLightGray, GColorWhite));
+  graphics_draw_text(ctx, "UPDATING", fonts_get_system_font(FONT_KEY_GOTHIC_14), text_rect,
+                      GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+}
+
+void barograph_draw_plot(GContext *ctx, GRect rect, const WeatherPayload *payload, int now_idx) {
   if (!payload) {
     graphics_context_set_stroke_color(ctx, GColorDarkGray);
     graphics_context_set_stroke_width(ctx, 1);
@@ -100,8 +140,9 @@ void barograph_draw_plot(GContext *ctx, GRect rect, const WeatherPayload *payloa
   int16_t series[SCALE_N_SAMPLES];
   memcpy(series, payload->press_series, sizeof(series));
 
-  uint8_t now_idx = prv_now_idx(payload);
-  int16_t delta3 = scale_trend_delta3(series, now_idx);
+  int split = prv_clamp_now_idx(now_idx);
+  uint8_t trend_idx = prv_trend_idx(split);
+  int16_t delta3 = scale_trend_delta3(series, trend_idx);
   ScaleTrend trend = scale_trend_from_delta3(delta3);
 
   int16_t lo, hi;
@@ -109,7 +150,7 @@ void barograph_draw_plot(GContext *ctx, GRect rect, const WeatherPayload *payloa
 
   ChartSpec spec = {
     .series = series,
-    .now_idx = now_idx,
+    .now_idx = split,
     .min_span = SCALE_MIN_SPAN,
     .line_color = barograph_trend_color(trend),
     .past_width = barograph_trend_width(trend),

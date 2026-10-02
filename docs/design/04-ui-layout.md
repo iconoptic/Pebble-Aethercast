@@ -167,10 +167,16 @@ Rules:
 - Call `window_set_touch_bridge_disabled(window, true)`, otherwise the system
   swallows touches before the recognizers see them.
 - What *is* scoped to visibility is the redraw machinery: the dashboard subscribes
-  the minute tick timer and the model listener in `appear` and drops both in
-  `disappear` (also cancelling the refresh-indicator `AppTimer` if one is running),
-  so nothing ticks while a detail screen is on top. On a watch rated for 30
-  days, leaving a per-minute redraw running behind another window is a real cost.
+  the minute tick timer and adds itself to the model listener list in `appear`,
+  and drops both in `disappear` (also cancelling the refresh-indicator `AppTimer`
+  if one is running), so nothing ticks while a detail screen is on top. The
+  barograph and temperature detail windows do the same with the listener list
+  on their own appear/disappear. The list is a fixed three slots with no
+  allocation; each window removes only itself, so a covered window's disappear
+  cannot clear the visible window's callback, and popping a detail window
+  restores the dashboard listener because the dashboard's appear runs again.
+  On a watch rated for 30 days, leaving a per-minute redraw running behind
+  another window is a real cost.
 
 ## Detail screens
 

@@ -12,6 +12,20 @@
 // -1 = follow "now"; see baro_detail.c for the same convention.
 static int s_cursor_idx = -1;
 
+static void prv_model_changed(void) {
+  detail_window_mark_dirty();
+}
+
+static void prv_appear(void *context) {
+  (void)context;
+  model_add_listener(prv_model_changed);
+}
+
+static void prv_disappear(void *context) {
+  (void)context;
+  model_remove_listener(prv_model_changed);
+}
+
 static uint8_t prv_now_idx(const WeatherPayload *payload) {
   return payload->press_now_idx < SCALE_N_SAMPLES ? payload->press_now_idx : SCALE_N_SAMPLES - 1;
 }
@@ -157,6 +171,8 @@ void temp_detail_push(GRect from_rect) {
     .from_rect = from_rect,
     .draw = prv_draw,
     .click = prv_click,
+    .appear = prv_appear,
+    .disappear = prv_disappear,
     .context = NULL,
   };
   detail_window_push(&spec);
