@@ -101,7 +101,7 @@ graph TD
     PKJS --> GEO
     GEO -->|lat, lon| PKJS
     CLAY -->|units, manual location| PKJS
-    PKJS -->|HTTPS GET ~1.8 kB JSON| OM
+    PKJS -->|HTTPS GET, 1–6 coordinates| OM
     OM -->|current + 36 hourly pressure + daily| PKJS
     PKJS -->|"AppMessage: ~150 byte payload"| UI
     UI --> CACHE
@@ -143,7 +143,7 @@ sequenceDiagram
         P->>O: GET /v1/forecast?lat&lon&current&hourly=pressure_msl,temperature_2m,weather_code&past_hours=24&forecast_hours=12&daily=...,weather_code&forecast_days=4
         O-->>P: 200 JSON (~2.4 kB)
         P->>P: Normalise → metric ints, pack 36×int16/uint8 series + 4-day outlook
-        P->>C: AppMessage {MSG_TYPE:1, ...27 keys, PRESS_SERIES/TEMP_SERIES: 72 bytes each}
+        P->>C: AppMessage {MSG_TYPE:1, ...29 keys, PRESS_SERIES/TEMP_SERIES: 72 bytes each}
         C->>C: persist_write() ×2 (core payload + forecast) + redraw
         C-->>U: Fresh data, "now" dot green
     else Location denied / timeout / guard fires first
@@ -162,6 +162,12 @@ sequenceDiagram
 After that first exchange the watch only fetches again when the user asks:
 `SELECT` (or a tap on the header) sends another `REQUEST`, and saving the Clay
 settings page triggers one from the phone side. There is no background polling.
+
+With **Pressure history: Follow me** (the default) that refresh may name up to
+six coordinates in the one Open-Meteo request: the past 24 h is stitched from
+places the phone has recorded, and the forecast half stays the current
+location. Manual location and **This location only** stay a single coordinate.
+See [docs/design/01-data-protocol.md](docs/design/01-data-protocol.md).
 
 ### 4.3 Module layout
 
@@ -191,6 +197,7 @@ graph LR
         IDX["index.js<br/>event wiring"]
         API["openmeteo.js<br/>URL build + fetch"]
         PACK["pack.js<br/>JSON → wire dict"]
+        TRAIL["trail.js<br/>where the user was,<br/>stitched 24 h"]
         CFG["config.js<br/>Clay schema"]
     end
 
@@ -199,7 +206,7 @@ graph LR
         T2["test_scale.c"]
         T3["test_units.c"]
         T4["test_wmo.c"]
-        T5["pack.test.js"]
+        T5["pack.test.js<br/>trail.test.js"]
     end
 
     MAIN --> COMM --> MODEL
@@ -214,6 +221,7 @@ graph LR
     L_COND --> LIB_UNITS
     L_FOOT --> LIB_UNITS
     IDX --> API --> PACK
+    IDX --> TRAIL --> PACK
     IDX --> CFG
     T1 -.-> LIB_MOON
     T2 -.-> LIB_SCALE
@@ -325,7 +333,10 @@ GET https://api.open-meteo.com/v1/forecast
 
 Smoke-tested live: returns **exactly 36 hourly samples**, ~1.8 kB, no API key.
 Free tier is non-commercial, < 10 000 calls/day — this app fetches once per launch
-plus whenever the user asks for a refresh, so it stays orders of magnitude under.
+plus whenever the user asks for a refresh. A follow-me refresh counts one call
+per coordinate (at most 6) even though they share one HTTP request, which is
+still orders of magnitude under the cap. See the call-count table in
+[docs/design/01-data-protocol.md](docs/design/01-data-protocol.md).
 
 `timezone` comes back as e.g. `America/Denver`. That string is only a fallback
 location label: the zone's representative city is not the town at the
@@ -337,7 +348,7 @@ optional Clay location name is used instead, else the zone city.
 
 ### 6.2 Wire format
 
-The whole payload is ~280 bytes across ~27 keys. Full key table in
+The whole payload is ~280 bytes across ~29 keys. Full key table in
 [docs/design/01-data-protocol.md](docs/design/01-data-protocol.md). Summary:
 
 | Key | Type | Notes |
@@ -465,7 +476,10 @@ put the maths somewhere a computer can check it.
    math), all-null `hourly.temperature_2m` → `ERR_CODE 4`, missing
    `daily.weather_code` → `ERR_CODE 4`, and short daily arrays padding the
    outlook by repeating the last day. `make -C tests check` runs this alongside
-   the C host suite.
+   the C host suite. `tests/trail.test.js` covers the follow-me trail: hour→place
+   assignment, 5 km clustering, 30 h pruning, the 6-place fetch cap, null
+   stitching, the place-change mask, the 3 h trend override, the pressure
+   cache, and the manual-location / "this location only" bypass.
 3. **Synthetic payload injector.** `tools/fake_payload.js` emits rising / falling /
    flat / sawtooth / missing-data series so every graph branch can be exercised in
    the emulator without waiting for real weather.
@@ -619,6 +633,7 @@ silently past the watch's 30 s watchdog with no `ERR_CODE` at all.
 | 64-colour e-paper contrast | Unreadable graph | Restrict to a checked palette; verify every zone on the real device at M8; monochrome fallback path is the same code with `PBL_IF_COLOR_ELSE`. |
 | Touch unavailable in watchfaces | Blocks a future watchface variant | Ship as watchapp now; if a watchface is wanted later it must be button-only. Touch is strictly an enhancement, never the only path to any action. |
 | Emulator on Arch (unsupported distro) | Can't iterate locally | Package mapping above; CloudPebble as documented fallback. |
+| Sparse trail: no background polling | A drive between two opens is drawn as a step at the second open, not at the hour the user arrived | Tick marks first-seen; documented in `docs/design/03-barograph.md`; trend uses the current place's own delta. |
 
 ---
 
@@ -637,7 +652,7 @@ pebble-aethercast/
 │  │  ├─ layers/    chart_layer.c  barograph_layer.c  moon_layer.c  conditions_layer.c
 │  │  │             icon_layer.c  footer_layer.c
 │  │  └─ lib/       moon.c  scale.c  wmo.c  units.c   ← host-testable, no pebble.h
-│  └─ pkjs/         index.js  openmeteo.js  pack.js  config.js
+│  └─ pkjs/         index.js  openmeteo.js  pack.js  trail.js  config.js
 ├─ tests/           Makefile  shim.h  test_main.c  js/message_keys.js  fixtures/
 │                   test_moon.c  test_scale.c  test_units.c  test_wmo.c  pack.test.js
 ├─ tools/

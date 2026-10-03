@@ -2,6 +2,15 @@
 #include "wire.h"
 #include "lib/scale.h"
 #include "lib/units.h"
+#include "lib/scale.h"
+
+// Core payload was 133 B; the place-change mask (5) and 3 h delta (2) make
+// 140. ForecastPayload is unchanged at 133. Both are under the 256 B/key cap.
+// SCHEMA stays 3 so an upgrade discards the old core cache by size (it wasn't
+// a stitched series) without also discarding the forecast cache.
+_Static_assert(sizeof(WeatherPayload) == 140, "WeatherPayload size drifted; update the protocol doc");
+_Static_assert(sizeof(WeatherPayload) <= 256, "WeatherPayload exceeds the persist key limit");
+_Static_assert(sizeof(ForecastPayload) <= 256, "ForecastPayload exceeds the persist key limit");
 
 _Static_assert(MODEL_GRAPH_MISLEADING_AFTER_S == SCALE_SAMPLE_PERIOD_S,
                "barograph placeholder threshold must be one hourly sample");
@@ -268,6 +277,20 @@ static void prv_apply_payload(DictionaryIterator *iter) {
   p.sunset_utc = wire_read_int32(iter, MESSAGE_KEY_SUNSET_UTC, 0);
   p.updated_utc = wire_read_int32(iter, MESSAGE_KEY_UPDATED_UTC, (int32_t)time(NULL));
   p.lat_sign = (int8_t)wire_read_int32(iter, MESSAGE_KEY_LAT_SIGN, 1);
+
+  // Optional. A missing or wrong-length mask means "no place changes" — the
+  // series is still valid, so this must not fail the payload.
+  if (!wire_read_bytes(iter, MESSAGE_KEY_PLACE_CHANGE, p.place_change, sizeof(p.place_change))) {
+    memset(p.place_change, 0, sizeof(p.place_change));
+  }
+
+  // press_series sits at an odd offset in the packed payload; copy it out
+  // before handing its address to scale.c, same as the draw path.
+  int16_t aligned[SCALE_N_SAMPLES];
+  memcpy(aligned, p.press_series, sizeof(aligned));
+  Tuple *delta = dict_find(iter, MESSAGE_KEY_PRESS_DELTA3);
+  p.press_delta3 = scale_effective_delta3(aligned, p.press_now_idx, delta != NULL,
+                                          delta ? (int16_t)delta->value->int32 : 0);
 
   Tuple *loc = dict_find(iter, MESSAGE_KEY_LOC_NAME);
   if (loc) {

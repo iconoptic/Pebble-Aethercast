@@ -4,6 +4,8 @@
 //
 // Dev usage from src/pkjs/index.js: set FAKE_PAYLOAD_PRESET to one of
 // PRESETS below to short-circuit the real fetch with one of these series.
+// 'trail' is a Denver → Kansas City drive over the 10 h before now, with
+// the place-change bit set so the watch draws a tick at the step.
 //
 // Standalone: NODE_PATH="$(pwd)/build/js" node tools/fake_payload.js <preset>
 // prints the packed wire dict (via src/pkjs/pack.js) as JSON. NODE_PATH must
@@ -53,12 +55,29 @@ function series_missing() {
   return out;
 }
 
+// Change at index 14, which is 10 h before the current hour (index 24).
+// Denver sits near 1006 hPa; Kansas City steps up to ~1018 and eases off.
+// The 3 h window (indices 21-24) is entirely Kansas City, so the trend word
+// stays STEADY instead of reporting the step as a front. Bit 14 of the
+// place-change mask is byte 1, bit 6 (1 << 6 = 64).
+var TRAIL_CHANGE_IDX = 14;
+
+function series_trail() {
+  var out = [];
+  for (var i = 0; i < HOURLY_SAMPLES; i++) {
+    if (i < TRAIL_CHANGE_IDX) out.push(1006.0 + i * 0.04);
+    else out.push(1018.0 - (i - TRAIL_CHANGE_IDX) * 0.06);
+  }
+  return out;
+}
+
 var PRESETS = {
   rising: series_rising,
   falling: series_falling,
   flat: series_flat,
   sawtooth: series_sawtooth,
   missing: series_missing,
+  trail: series_trail,
 };
 
 // Builds an Open-Meteo `/v1/forecast`-shaped JSON object carrying one of the
@@ -96,7 +115,7 @@ function buildFakeJson(presetName, nowUtc, opts) {
     wxHourly.push(opts.wxCode !== undefined ? opts.wxCode : 2);
   }
 
-  return {
+  var json = {
     latitude: 42.33,
     longitude: -83.05,
     timezone: 'America/Detroit',
@@ -126,6 +145,14 @@ function buildFakeJson(presetName, nowUtc, opts) {
       weather_code: wxHourly,
     },
   };
+  if (presetName === 'trail') {
+    json.timezone = 'America/Chicago';
+    json.latitude = 39.1;
+    json.longitude = -94.58;
+    // Bit 14: the Denver → Kansas City step. See series_trail.
+    json.place_change = [0, 64, 0, 0, 0];
+  }
+  return json;
 }
 
 module.exports = {

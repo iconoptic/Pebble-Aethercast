@@ -162,17 +162,44 @@ function packError(errCode) {
   return dict;
 }
 
-function packPayload(json, nowUtc, unitSystem, placeName) {
+// 5 bytes, bit i (little-endian) set when slot i's place differs from slot
+// i-1. All-zero masks are omitted so a single-place refresh stays shaped
+// like the pre-trail payload. The watch treats a missing key as "no moves".
+function placeChangeBytes(value) {
+  if (!Array.isArray(value) || value.length !== 5) return null;
+  var out = [];
+  var any = false;
+  for (var i = 0; i < 5; i++) {
+    var n = Number(value[i]);
+    if (!isFinite(n)) return null;
+    var b = n & 0xff;
+    if (b) any = true;
+    out.push(b);
+  }
+  return any ? out : null;
+}
+
+// Fourth argument is a place-name string (manual name or reverse geocode)
+// or an options object { placeName, pressure, placeChange, delta3Tenths }.
+function packOpts(placeOrOpts) {
+  if (placeOrOpts == null) return {};
+  if (typeof placeOrOpts === 'string') return { placeName: placeOrOpts };
+  return placeOrOpts;
+}
+
+function packPayload(json, nowUtc, unitSystem, placeOrOpts) {
   try {
-    return buildPayloadDict(json, nowUtc, unitSystem, placeName);
+    return buildPayloadDict(json, nowUtc, unitSystem, packOpts(placeOrOpts));
   } catch (e) {
     console.log('AetherCast: malformed Open-Meteo response: ' + e.message);
     return packError(4);
   }
 }
 
-function buildPayloadDict(json, nowUtc, unitSystem, placeName) {
-  var pressure = fillNulls(json.hourly.pressure_msl);
+function buildPayloadDict(json, nowUtc, unitSystem, opts) {
+  // opts.pressure is the stitched personal history. Without it the series
+  // is the single location's own hourly.pressure_msl, as before.
+  var pressure = fillNulls(opts.pressure || json.hourly.pressure_msl);
   if (!pressure) return packError(4);
   pressure = normalizeLength(pressure);
 
@@ -215,13 +242,30 @@ function buildPayloadDict(json, nowUtc, unitSystem, placeName) {
   dict[MessageKeys.SUNRISE_UTC] = Math.round(num(json.daily.sunrise[todayIdx]));
   dict[MessageKeys.SUNSET_UTC] = Math.round(num(json.daily.sunset[todayIdx]));
   dict[MessageKeys.UPDATED_UTC] = nowUtc;
-  dict[MessageKeys.LOC_NAME] = formatLocName(placeName, json.timezone);
+  dict[MessageKeys.LOC_NAME] = formatLocName(opts.placeName, json.timezone);
   dict[MessageKeys.LAT_SIGN] = num(json.latitude) < 0 ? -1 : 1;
+
+  // Optional. Absent on a single-place refresh and on any payload from an
+  // older phone build. SCHEMA stays at 3 — see 01-data-protocol.md.
+  var placeChange = placeChangeBytes(opts.placeChange || json.place_change);
+  if (placeChange) {
+    dict[MessageKeys.PLACE_CHANGE] = placeChange;
+  }
+  // Sent only when a place change falls inside the 3 h trend window, so the
+  // watch doesn't read the stitched step as weather. 0 is a real override
+  // (steady at the current place) and must not be dropped.
+  if (opts.delta3Tenths !== undefined && opts.delta3Tenths !== null && isFinite(opts.delta3Tenths)) {
+    dict[MessageKeys.PRESS_DELTA3] = opts.delta3Tenths | 0;
+  }
   return dict;
 }
 
 module.exports = {
   packPayload: packPayload,
   packError: packError,
+  fillNulls: fillNulls,
+  normalizeLength: normalizeLength,
   SCHEMA_VERSION: SCHEMA_VERSION,
+  HOURLY_SAMPLES: HOURLY_SAMPLES,
+  NOW_IDX: NOW_IDX,
 };

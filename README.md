@@ -22,6 +22,18 @@ A Pebble Time 2 watchapp: current conditions, a **barometric pressure graph**
 > the series no longer covers now). See [docs/design/03-barograph.md](docs/design/03-barograph.md).
 > Start at **[PLAN.md](PLAN.md)**.
 
+## Privacy
+
+The "follow me" pressure history is a trail of where the phone has been,
+stored only in PebbleKit JS `localStorage` (rounded to about 0.01°, kept
+about 30 h). It is only as fine-grained as how often the app is opened: a
+place is recorded when a refresh runs, and the tick marks when the new
+place was first seen, not when you arrived. It never goes to the watch and
+it never goes to a server of ours. Open-Meteo receives coordinates, which it already did for the current
+fix; the watch receives the weather and a bit mask of *when* the place
+changed, not the coordinates. "This location only", manual location, and
+"Clear location history" in settings stop or delete that trail.
+
 ## Why this exists
 
 Off-the-shelf Pebble weather apps show you a temperature. This one is built around

@@ -77,7 +77,12 @@ void barograph_draw_label(GContext *ctx, GRect rect, const WeatherPayload *paylo
   memcpy(series, payload->press_series, sizeof(series));
 
   uint8_t trend_idx = prv_trend_idx(now_idx);
-  int16_t delta3 = scale_trend_delta3(series, trend_idx);
+  // A live divider uses the phone's place-aware delta. A re-anchored
+  // divider (or an omitted one) is a later sample, so the stored delta
+  // would describe the wrong hour.
+  int16_t delta3 = value_from_sample
+      ? scale_trend_delta3(series, trend_idx)
+      : payload->press_delta3;
   ScaleTrend trend = scale_trend_from_delta3(delta3);
   int16_t value = value_from_sample ? series[trend_idx] : payload->press_hpa10;
 
@@ -142,7 +147,10 @@ void barograph_draw_plot(GContext *ctx, GRect rect, const WeatherPayload *payloa
 
   int split = prv_clamp_now_idx(now_idx);
   uint8_t trend_idx = prv_trend_idx(split);
-  int16_t delta3 = scale_trend_delta3(series, trend_idx);
+  // Same rule as the label: the stored delta belongs to the recorded now.
+  int16_t delta3 = (split == (int)payload->press_now_idx)
+      ? payload->press_delta3
+      : scale_trend_delta3(series, trend_idx);
   ScaleTrend trend = scale_trend_from_delta3(delta3);
 
   int16_t lo, hi;
@@ -157,6 +165,7 @@ void barograph_draw_plot(GContext *ctx, GRect rect, const WeatherPayload *payloa
     .show_grid = true,
     .grid_step = scale_grid_step(lo, hi),
     .cursor_idx = -1,
+    .place_change = payload->place_change,
   };
   chart_layer_draw(ctx, rect, &spec);
 }

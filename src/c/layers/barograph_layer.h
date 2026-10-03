@@ -6,11 +6,11 @@
 #include "../lib/scale.h"
 
 // Draws the pressure label row: value, 3h delta, and trend word.
-// `now_idx` selects the sample the trend is computed from (the divider).
-// -1 uses the last sample. `value_from_sample` prints that sample instead
-// of press_hpa10 — used when the divider has been re-anchored, so the
-// number and the dot agree. A live reading passes false and keeps the
-// instantaneous press_hpa10.
+// `now_idx` selects the sample when the divider has moved off the recorded
+// now. -1 uses the last sample. A live reading (`value_from_sample` false)
+// prints press_hpa10 and uses press_delta3, the phone's place-aware 3 h
+// delta. A re-anchored reading prints that sample and the series delta
+// ending there, so the number and the dot agree.
 void barograph_draw_label(GContext *ctx, GRect rect, const WeatherPayload *payload,
                           int now_idx, bool value_from_sample);
 

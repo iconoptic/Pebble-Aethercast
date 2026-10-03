@@ -49,6 +49,10 @@ function testHappyPath() {
   assert.strictEqual(dict[MessageKeys.SUNRISE_UTC], fixture.daily.sunrise[1]);
   assert.strictEqual(dict[MessageKeys.SUNSET_UTC], fixture.daily.sunset[1]);
   assert.strictEqual(dict[MessageKeys.PRESS_T0_UTC], fixture.hourly.time[0]);
+  // A single-location pack does not grow the dictionary. PLACE_CHANGE and
+  // PRESS_DELTA3 are optional and absent unless a trail stitch asks for them.
+  assert.strictEqual(dict[MessageKeys.PLACE_CHANGE], undefined);
+  assert.strictEqual(dict[MessageKeys.PRESS_DELTA3], undefined);
 
   var temp = unpackInt16Series(dict[MessageKeys.TEMP_SERIES], 10, 36);
   for (var i = 0; i < 36; i++) {

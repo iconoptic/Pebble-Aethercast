@@ -3,6 +3,9 @@ build/
 *.pbw
 .lock-waf_*
 
+# Host test binary (rebuilt by `make -C tests`)
+tests/run
+
 # Node
 node_modules/
 

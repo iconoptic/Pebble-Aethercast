@@ -8,7 +8,7 @@ CFLAGS ?= -std=c11 -Wall -Wextra -g
 LDLIBS = -lm
 
 SRC = ../src/c/lib/scale.c ../src/c/lib/moon.c ../src/c/lib/units.c ../src/c/lib/wmo.c \
-      test_scale.c test_moon.c test_units.c test_wmo.c test_main.c
+      test_scale.c test_moon.c test_units.c test_wmo.c test_place_change.c test_main.c
 
 run: $(SRC) shim.h ../src/c/lib/scale.h ../src/c/lib/moon.h ../src/c/lib/units.h ../src/c/lib/wmo.h
 	$(CC) $(CFLAGS) -o run $(SRC) $(LDLIBS)
@@ -20,6 +20,7 @@ run: $(SRC) shim.h ../src/c/lib/scale.h ../src/c/lib/moon.h ../src/c/lib/units.h
 js:
 	NODE_PATH="$(CURDIR)/js" node pack.test.js
 	NODE_PATH="$(CURDIR)/js" node geocode.test.js
+	NODE_PATH="$(CURDIR)/js" node trail.test.js
 
 .PHONY: check
 check: run js

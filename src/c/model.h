@@ -52,6 +52,15 @@ typedef struct __attribute__((__packed__)) {
   int32_t updated_utc;
   char loc_name[24];
   int8_t lat_sign;
+  // 36 bits, little-endian: bit i set when slot i's place differs from slot
+  // i-1. All zeros when PLACE_CHANGE is absent (single place, or an older
+  // phone build). 5 bytes keeps press_delta3 2-byte aligned in this packed
+  // struct (offset 138). See docs/design/01-data-protocol.md.
+  uint8_t place_change[5];
+  // Authoritative 3 h trend, tenths of hPa. Equals the stitched series when
+  // the user stayed put; the current place's own delta when a move falls
+  // inside the trend window.
+  int16_t press_delta3;
 } WeatherPayload;
 
 // Forecast-detail-screen data: kept in a second persist key rather than

@@ -79,6 +79,40 @@ void chart_layer_draw(GContext *ctx, GRect rect, const ChartSpec *spec) {
     }
   }
 
+  // Place-change ticks: a short mark at the top of the plot where the
+  // stitched history switched places. A step there is real (first seen at a
+  // new place), and the tick is what separates it from weather. Missing mask = no ticks.
+  if (spec->place_change) {
+    int16_t tick_h = (int16_t)(rect.size.h / 8);
+    if (tick_h < 5) {
+      tick_h = 5;
+    }
+    if (tick_h > 14) {
+      tick_h = 14;
+    }
+    graphics_context_set_stroke_width(ctx, 1);
+    graphics_context_set_stroke_color(ctx, PBL_IF_COLOR_ELSE(GColorLightGray, GColorWhite));
+    for (int i = 1; i < SCALE_N_SAMPLES; i++) {
+      if (!scale_place_change_bit(spec->place_change, i)) {
+        continue;
+      }
+      int16_t x = pts[i].x;
+      // The now-divider is a full-height white line; nudge a tick that lands
+      // on it so both stay visible.
+      if (show_now && i == (int)now_idx && x > rect.origin.x + 3) {
+        x = (int16_t)(x - 3);
+      }
+      int16_t y1 = (int16_t)(rect.origin.y + tick_h);
+      if (y1 > bottom) {
+        y1 = bottom;
+      }
+      graphics_draw_line(ctx, GPoint(x, rect.origin.y), GPoint(x, y1));
+      if (x + 1 < rect.origin.x + rect.size.w) {
+        graphics_draw_line(ctx, GPoint((int16_t)(x + 1), rect.origin.y), GPoint((int16_t)(x + 1), y1));
+      }
+    }
+  }
+
   if (show_now) {
     // Now divider: full plot height.
     graphics_context_set_stroke_color(ctx, GColorWhite);

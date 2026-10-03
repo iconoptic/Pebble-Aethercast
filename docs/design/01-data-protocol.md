@@ -14,9 +14,14 @@ This turns out to be a feature rather than a consolation prize:
 | Forecast | impossible | 12 h ahead |
 | Battery | continuous sensor polling | one HTTPS call per refresh, on the phone |
 
-The honest trade-off is that it is *regional model* pressure, not *your* pressure.
-For "is a front coming through", which is what a barograph is actually for, the
-model is the better signal.
+The past 24 h is the pressure along the user's own path, not the history of
+wherever they happen to be standing: the phone remembers where it was, and
+each past hour is filled from Open-Meteo at that place. Because the series is
+`pressure_msl` (sea-level reduced), a Denver sample and a Kansas City sample
+are directly comparable, which is what makes the stitch meaningful. The
+future 12 h stays the forecast for the current location — the app cannot know
+where the user is going. A fixed manual location, or the "This location only"
+setting, keeps the old behaviour: the whole graph is one place.
 
 ## Upstream request
 
@@ -99,6 +104,72 @@ With `past_days=1&forecast_days=2` the daily arrays have 3 entries. Today is the
 index `i` where `daily.time[i] <= (now + utc_offset_seconds) < daily.time[i] + 86400`.
 Do not assume index 1.
 
+## Several locations in one request
+
+The past half of the barograph is stitched from the user's trail
+(`src/pkjs/trail.js`), so one refresh may ask for more than one coordinate.
+A trail entry is written only on a refresh (launch, SELECT, or saving
+settings). Its time is when that refresh first saw the user there. A place
+passed between two refreshes is absent, and the place-change tick falls on
+the first hour of the newly seen place. See
+[03-barograph.md](03-barograph.md) "Limits of the stitched history".
+Open-Meteo accepts comma-separated `latitude` and `longitude` lists of equal
+length. Verified live on 2026-10-02 for Denver (`39.74,-104.99`) and Kansas
+City (`39.10,-94.58`), `past_hours=24&forecast_hours=12&timeformat=unixtime`:
+
+- One coordinate returns a JSON **object**, the shape above.
+- Two coordinates return a JSON **array** of those objects. A trimmed copy is
+  `tests/fixtures/openmeteo-multi.json`.
+- `hourly.time` was identical in both elements (36 samples, step 3600 s) even
+  though the timezones differed (`America/Denver` vs `America/Chicago`).
+  Index 24 was `1790924400` (2026-10-02 07:00 UTC), the hour that contained
+  the request (07:22 UTC). `floor(now / 3600) * 3600` is that index, and
+  index 0 is 24 hours earlier.
+- The service snaps coordinates onto its grid (`39.74` came back as
+  `39.746895`). The second element carried `location_id: 1`; the first
+  omitted it. Array order matched the request this time, but the app does
+  not trust that: it pairs each result to the coordinate it asked for by
+  distance. A coordinate with no result within 50 km fails the *stitch*,
+  not the refresh.
+- Each coordinate counts as one free-tier API call, even though they share a
+  single HTTP request. The app sends at most 6, current location first.
+
+The current location is always requested (conditions, daily, and the forecast
+half). Another place is added only when one of its past hours is not already
+in the on-phone pressure cache. Resolved past hours are stored as
+`hour epoch → {lat, lon, pressure}` and reused on the next refresh, so a
+later Open-Meteo revision of the same place cannot move history the graph
+has already shown. The current hour and the forecast are never cached. A
+null sample is not cached either, so a gap can fill in later. Cached hours
+older than 30 h are dropped.
+
+| Refresh | API calls |
+|---|---|
+| Before this change, every refresh | 1 |
+| Follow me, one place, or every other place already cached | 1 |
+| Follow me, N places with an unresolved past hour | N (2 ≤ N ≤ 6), one HTTP request |
+| Manual location, or "This location only" | 1, and the trail is not read or extended |
+
+If stitching fails for any reason — a coordinate with no result within 50 km,
+a place whose `hourly.pressure_msl` is not an array, or an exception while
+planning or integrating — the phone sends the plain single-place payload for
+the current location. That dict has no `PLACE_CHANGE` mask and no
+`PRESS_DELTA3`. It is not an error, as long as the current location's
+forecast is usable. (`packPayload` itself returns `packError(4)` on a bad
+body; that path is not a stitch fallback.) `plan.coords[0]` is the current
+fix, and a successful alignment puts its object first; when alignment
+itself fails, the phone picks the result nearest the current fix from the
+body it already has. That in-hand fallback sends nothing extra to
+Open-Meteo. Only when the current location cannot be found in that body does
+the phone make the normal single-place request — the same one a non-trail
+refresh makes — and only while the shared time budget from the trail
+request still has at least 5 s left (both requests together stay under
+about 25 s against the watch's 30 s watchdog); otherwise it sends
+`packError(4)`. A `localStorage` failure while recording the fix or the
+pressure cache is logged and ignored; the in-memory trail is what this
+refresh uses, and the watch still receives weather instead of waiting out
+the 30 s watchdog.
+
 ## Wire format (phone → watch)
 
 `messageKeys` in `package.json`. One dictionary per update; the core weather
@@ -108,7 +179,7 @@ dictionary, not separate messages.
 | Key | Type | Unit / encoding | Notes |
 |---|---|---|---|
 | `MSG_TYPE` | uint8 | 1 = payload, 2 = error | always present |
-| `SCHEMA` | uint8 | currently 3 | bump to invalidate cache (both persist keys, see below) |
+| `SCHEMA` | uint8 | currently 3 | left at 3 on purpose when the place-change mask was added; see below |
 | `UNIT_SYSTEM` | uint8 | 0 = imperial, 1 = metric | from Clay settings, M7; applied on the watch at render time |
 | `TEMP_C10` | int16 | tenths °C | |
 | `FEELS_C10` | int16 | tenths °C | |
@@ -134,6 +205,8 @@ dictionary, not separate messages.
 | `UPDATED_UTC` | int32 | epoch seconds | staleness reference |
 | `LOC_NAME` | cstring | ≤ 24 bytes incl. NUL | reverse-geocoded / manual place; timezone city if that misses; UTF-8-safe ≤ 23 bytes |
 | `LAT_SIGN` | int8 | +1 / −1 | southern hemisphere moon mirroring |
+| `PLACE_CHANGE` | bytes[5] | 36 bits, little-endian | **optional.** Bit `i` is set when slot `i`'s place differs from slot `i-1`. Absent (or the wrong length) means no moves: the watch draws no ticks. All-zero masks are not sent. |
+| `PRESS_DELTA3` | int16 | tenths hPa | **optional.** Sent only when a place change falls inside the 3 h trend window. It is the current location's own `pressure[now] − pressure[now−3]`, so the step is not classified as weather. Absent means "compute it from `PRESS_SERIES`", which is what a single-place series already is. `0` is a real override and is sent. |
 | `ERR_CODE` | uint8 | only when `MSG_TYPE=2` | |
 
 Total ≈ 280 bytes of values (core + forecast fields) plus dictionary overhead
@@ -147,6 +220,26 @@ combined struct would exceed that. A malformed/missing forecast in an inbound
 dictionary never fails the core weather update — it just leaves whichever
 forecast (if any) was already cached in place, via `model_get_forecast()`
 returning `NULL` until one arrives.
+
+### Why `SCHEMA` stayed at 3
+
+`WeatherPayload` was 133 bytes. `PLACE_CHANGE` (5) and `press_delta3` (2, the
+persisted form of `PRESS_DELTA3`) bring it to **140**. `ForecastPayload` is
+unchanged at 133. Both sit well under the 256-byte key limit — the core
+payload was not close to it; the two structs *together* are what used to
+overflow one key, which is why they are split.
+
+`SCHEMA` was not bumped:
+
+- Both new keys are optional. A dictionary without them is still a valid v3
+  payload, and the watch treats that as "no place changes, trend from the
+  series", which is today's behaviour.
+- `persist_read_data` requires the stored byte count to equal
+  `sizeof(WeatherPayload)`. An older 133-byte core cache fails that check and
+  is discarded (it was not a stitched series). Bumping `SCHEMA` would also
+  discard the forecast cache, whose layout did not change.
+- `PRESS_SERIES`, `PRESS_NOW_IDX`, and `PRESS_T0_UTC` keep their meaning and
+  size. The watch-side series format did not change.
 
 ### Watch → phone
 

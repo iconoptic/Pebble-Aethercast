@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 
 // Pure, host-testable barometric-pressure scaling maths - deliberately no
@@ -76,5 +77,14 @@ int32_t scale_recorded_now_lag_s(int32_t t0_utc, uint8_t now_idx, int32_t now_ut
 // 3-hour pressure delta (tenths hPa) ending at now_idx, the standard
 // meteorological trend convention. Returns 0 if now_idx < 3.
 int16_t scale_trend_delta3(const int16_t series[SCALE_N_SAMPLES], uint8_t now_idx);
+
+// Little-endian bit i of a 5-byte place-change mask. False when the mask is
+// NULL or idx is outside 0..SCALE_N_SAMPLES-1. Same layout JS buildMask writes.
+bool scale_place_change_bit(const uint8_t mask[5], int idx);
+
+// PRESS_DELTA3 when the phone sent one (including 0), otherwise the series
+// delta. now_idx is clamped to the last sample before the series is read.
+int16_t scale_effective_delta3(const int16_t *series, uint8_t now_idx,
+                               bool has_override, int16_t override_tenths);
 
 ScaleTrend scale_trend_from_delta3(int16_t delta3);

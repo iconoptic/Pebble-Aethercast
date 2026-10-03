@@ -6,9 +6,13 @@ The reason this app exists.
 
 36 samples of MSL pressure in tenths of hPa, hourly, from `PRESS_SERIES`:
 
-- indices `0 … 23` — the last 24 hours (index 23 is the most recent past hour)
-- index `24` = `PRESS_NOW_IDX` — now
-- indices `25 … 35` — the next 11 hours of forecast
+- indices `0 … 23` — the last 24 hours (index 23 is the most recent past hour).
+  With "Follow me" each of those hours is the pressure at a place the app
+  had already recorded, not a continuous track of the trip and not 24 h at
+  the current coordinates. "This location only" and a manual location keep
+  the whole series at one place. See "Limits of the stitched history".
+- index `24` = `PRESS_NOW_IDX` — now, always the current location
+- indices `25 … 35` — the next 11 hours of forecast, always the current location
 
 `PRESS_T0_UTC` is the epoch of index 0, so hour labels are derivable without
 sending any extra time data.
@@ -85,11 +89,20 @@ Draw order:
 4. **Forecast segment** (`i = now_idx … 35`): 1 px, same trend colour, dashed by drawing
    every other sample-to-sample segment. Visually subordinate — it is a model, not
    a measurement. Empty when the divider is omitted or sits on the last sample.
-5. **Now divider** at `x(now_idx)`: vertical 1 px line, `GColorWhite`, full plot height.
+5. **Place-change ticks**, only when `PLACE_CHANGE` is present. Bit `i` of
+   that 5-byte little-endian mask marks a slot whose place differs from the
+   slot before it. Each set bit draws a short light-gray tick down from the
+   top of the plot (2 px wide, about an eighth of the plot height). A tick
+   that lands on the now-divider is nudged 3 px left so both stay visible.
+   A missing mask draws nothing, on the dashboard and on the detail screen.
+   The step is the new place's pressure against the previous one. The tick
+   marks the first hour that place was seen, which is what separates the
+   step from weather. It does not mark the hour the user arrived.
+6. **Now divider** at `x(now_idx)`: vertical 1 px line, `GColorWhite`, full plot height.
    On a live payload `now_idx` is `PRESS_NOW_IDX` (24). After a failed refresh it
    is the re-anchored index below, and it is omitted entirely when that index
    falls off the end of the series.
-6. **Current-value dot**: 3 px filled circle at `(x(now_idx), y(series[now_idx]))`.
+7. **Current-value dot**: 3 px filled circle at `(x(now_idx), y(series[now_idx]))`.
    Omitted together with the divider.
 
 ## Stale cache on launch, and a failed refresh
@@ -152,7 +165,10 @@ last sample and the 3 h trend into it, which is the newest hour the cache has,
 not a claim about the present.
 
 A live payload (`MODEL_GRAPH_LIVE`) is unchanged: divider at `press_now_idx`,
-label value `press_hpa10`.
+label value `press_hpa10`, and the 3 h word from `press_delta3` (the phone's
+place-aware delta when a move falls inside that window). A re-anchored
+divider uses the series delta ending at the new sample, because the stored
+delta still describes the recorded hour.
 
 ## Trend
 
@@ -161,6 +177,20 @@ Computed from the 3-hour change, which is the standard meteorological convention
 ```
 delta3 = series[NOW_IDX] − series[NOW_IDX − 3]      // tenths hPa
 ```
+
+That delta is wrong when the user changed place inside the window: the
+stitched step is a difference between two cities, and it will read as
+`FALLING FAST` or `RISING FAST`. The rule is:
+
+- Look at place-change bits `NOW_IDX−2`, `NOW_IDX−1`, and `NOW_IDX` (the
+  three steps that make up the 3 h delta).
+- If none of them is set, classify from the series, as above. The phone
+  omits `PRESS_DELTA3` and the watch computes it.
+- If any of them is set, classify from the **current place's own** hourly
+  pressure over the same two timestamps, sent as `PRESS_DELTA3`. The drawn
+  series still contains the step. The detail screen's `3h` figure uses this
+  same value. Its `6h` and `12h` figures stay on the drawn series, so a
+  drive inside those wider windows shows up there on purpose.
 
 | |Δ₃| (hPa) | Word | Colour |
 |---|---|---|
@@ -178,6 +208,36 @@ non-ASCII glyphs whose coverage in the system fonts is unverified.
 Falling pressure gets warm colours because a falling barometer is the thing you
 want to notice.
 
+## Limits of the stitched history
+
+The phone runs on launch, on SELECT / a header tap, and when Clay settings
+are saved. It does not sample in the background, and `recordFix` runs only
+from that refresh. Three consequences:
+
+- A place's recorded time is when the app first saw the user there.
+  `appendFix` keeps that first-seen time and does not move it when the same
+  place is seen again.
+- A place the user passed through between two opens is never recorded. The
+  graph has no way to invent it.
+- Example: the app is opened in Denver at 08:00 and next in Kansas City at
+  18:00. The past hours through 17:00 are Denver's pressure, the step and the
+  place-change tick sit at 18:00, even if the drive ended at 14:00. The tick
+  means "first seen at the new place", not "arrived".
+
+The 3 h trend still uses the current place's own delta when that tick falls
+inside the trend window, so the late step is not classified as a front.
+
+## Open questions
+
+A gap longer than 3 h could place the tick at the midpoint between the last
+fix at the old place and the first fix at the new one. In the Denver →
+Kansas City example that would move the mark from 18:00 toward 13:00, nearer
+a drive that might have finished at 14:00. It would still be a guess: the
+phone never saw the departure, and the hours before the midpoint would keep
+Denver's pressure while the tick claimed the user had already left, so the
+mark would no longer sit on the sample where the series changes. Left as
+first-seen until that trade-off is chosen.
+
 ## Units
 
 Pressure is always rendered in hPa — `v / 10`, e.g. `1006.6 hPa`. The Clay unit
@@ -192,6 +252,8 @@ unitless, so adding inHg (`v * 0.02953 / 10` → `29.72 inHg`) or mmHg
 |---|---|
 | All 36 samples identical | Flat line dead centre, `STEADY`, no divide-by-zero |
 | Series contains a forward-filled gap | Renders as a flat run; no marker (JS already handled it) |
+| Place change between two hours | The step is drawn (it is the data) and a short tick marks that slot. Trend uses the current place if the change is inside the 3 h window |
+| `PLACE_CHANGE` absent | No ticks. Trend from the series. Identical to a single-place graph |
 | Extreme range (e.g. 40 hPa over 24 h) | 10% padding, curve stays inside the rect |
 | Cached data, divider still on the right hour | Plot is drawn from the cached series. Staleness is the header dot and age. A cache younger than one sample (`MODEL_GRAPH_MISLEADING_AFTER_S`) always takes this path, including while a refresh is in flight |
 | Cached now is ≥ 1 sample behind, refresh in flight | Loading placeholder in the plot zone (dotted midline + `UPDATING`). The value/trend label is omitted — it is computed from that same sample |
@@ -248,3 +310,7 @@ Assertions:
   including 59 minutes into that hour; 3 h later is 27; 11 h later is 35;
   12 h later (and anything past the last sample) is −1 so the divider is
   omitted; `now < press_t0_utc` is also −1 (omit the divider)
+- `scale_place_change_bit` reads the same little-endian bit JS `buildMask` writes
+  (`tests/test_place_change.c` and `tests/trail.test.js` share one byte table)
+- `scale_effective_delta3` returns a sent `PRESS_DELTA3`, including 0, and
+  otherwise `scale_trend_delta3` after clamping `now_idx`

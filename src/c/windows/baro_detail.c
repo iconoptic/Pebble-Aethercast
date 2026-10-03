@@ -88,7 +88,12 @@ static void prv_draw(GContext *ctx, GRect bounds, void *context) {
 
     int16_t lo, hi;
     scale_bounds(series, &lo, &hi);
-    int16_t delta3 = scale_trend_delta3(series, (uint8_t)anchor);
+    // A live divider uses the phone's place-aware delta. A re-anchored
+    // divider is a later sample, so the stored delta would describe the
+    // wrong hour. 6 h and 12 h always describe the drawn series.
+    int16_t delta3 = (view.mode == MODEL_GRAPH_LIVE)
+        ? payload->press_delta3
+        : scale_trend_delta3(series, (uint8_t)anchor);
     ScaleTrend trend = scale_trend_from_delta3(delta3);
     ChartSpec spec = {
       .series = series,
@@ -99,13 +104,14 @@ static void prv_draw(GContext *ctx, GRect bounds, void *context) {
       .show_grid = true,
       .grid_step = scale_grid_step(lo, hi),
       .cursor_idx = s_cursor_idx,
+      .place_change = payload->place_change,
     };
     chart_layer_draw(ctx, chart_rect, &spec);
 
     GRect delta_rect = GRect(bounds.origin.x + 6, (int16_t)(bounds.origin.y + title_h + chart_h),
                              bounds.size.w - 12, delta_h);
     char d3[12], d6[12], d12[12], line[48];
-    barograph_format_delta(prv_delta_over(series, (uint8_t)anchor, 3), d3, sizeof(d3));
+    barograph_format_delta(delta3, d3, sizeof(d3));
     barograph_format_delta(prv_delta_over(series, (uint8_t)anchor, 6), d6, sizeof(d6));
     barograph_format_delta(prv_delta_over(series, (uint8_t)anchor, 12), d12, sizeof(d12));
     snprintf(line, sizeof(line), "3h %s  6h %s  12h %s", d3, d6, d12);
