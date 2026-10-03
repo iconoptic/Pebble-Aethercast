@@ -1,6 +1,10 @@
 #include "model.h"
 #include "wire.h"
+#include "lib/scale.h"
 #include "lib/units.h"
+
+_Static_assert(MODEL_GRAPH_MISLEADING_AFTER_S == SCALE_SAMPLE_PERIOD_S,
+               "barograph placeholder threshold must be one hourly sample");
 
 #define PERSIST_KEY_PAYLOAD 1
 #define PERSIST_KEY_FORECAST 2
@@ -15,7 +19,7 @@ static ModelStatus s_status;
 static uint8_t s_err_code;
 static bool s_refreshing;
 static AppTimer *s_watchdog;
-static ModelListener s_listener;
+static ModelListener s_listeners[MODEL_LISTENER_SLOTS];
 
 // Indexed by ERR_CODE (0 = watch-side watchdog, 1-4 = phone-side codes) - see
 // docs/design/01-data-protocol.md "Error codes".
@@ -24,8 +28,11 @@ static const char *const s_error_text[] = {
 };
 
 static void prv_notify(void) {
-  if (s_listener) {
-    s_listener();
+  // Listeners only mark a layer dirty; they don't add or remove slots.
+  for (int i = 0; i < MODEL_LISTENER_SLOTS; i++) {
+    if (s_listeners[i]) {
+      s_listeners[i]();
+    }
   }
 }
 
@@ -128,10 +135,71 @@ void model_note_request_sent(void) {
   }
   s_refreshing = true;
   s_watchdog = app_timer_register(WATCHDOG_TIMEOUT_MS, prv_watchdog_fired, NULL);
+  // Launch refresh starts from PKJS_READY, which does not otherwise redraw.
+  // Without this the misleading cache would stay on screen until the
+  // payload (or the watchdog) arrived.
+  prv_notify();
 }
 
-void model_set_listener(ModelListener listener) {
-  s_listener = listener;
+void model_add_listener(ModelListener listener) {
+  if (!listener) {
+    return;
+  }
+  int free_slot = -1;
+  for (int i = 0; i < MODEL_LISTENER_SLOTS; i++) {
+    if (s_listeners[i] == listener) {
+      return;
+    }
+    if (!s_listeners[i] && free_slot < 0) {
+      free_slot = i;
+    }
+  }
+  if (free_slot >= 0) {
+    s_listeners[free_slot] = listener;
+  } else {
+    APP_LOG(APP_LOG_LEVEL_ERROR, "model: listener list full");
+  }
+}
+
+void model_remove_listener(ModelListener listener) {
+  for (int i = 0; i < MODEL_LISTENER_SLOTS; i++) {
+    if (s_listeners[i] == listener) {
+      s_listeners[i] = NULL;
+    }
+  }
+}
+
+static int prv_recorded_now_idx(void) {
+  return s_payload.press_now_idx < SCALE_N_SAMPLES ? s_payload.press_now_idx : SCALE_N_SAMPLES - 1;
+}
+
+void model_get_graph_view(ModelGraphView *out) {
+  out->mode = MODEL_GRAPH_ABSENT;
+  out->now_idx = -1;
+  if (!s_has_data) {
+    return;
+  }
+
+  int recorded = prv_recorded_now_idx();
+  int32_t now = (int32_t)time(NULL);
+  bool misleading = scale_recorded_now_lag_s(s_payload.press_t0_utc, (uint8_t)recorded, now)
+                    >= MODEL_GRAPH_MISLEADING_AFTER_S;
+  // Misleading cache: LOADING only while a refresh can clear it. Otherwise
+  // re-anchor whatever the status (FRESH/STALE/ERROR) — at launch with no
+  // phone, PKJS_READY never arrives and nothing is in flight until the
+  // minute tick, so LOADING would stick forever.
+  if (misleading) {
+    if (s_refreshing) {
+      out->mode = MODEL_GRAPH_LOADING;
+      out->now_idx = recorded;
+      return;
+    }
+    out->mode = MODEL_GRAPH_REANCHORED;
+    out->now_idx = scale_reanchor_now_idx(s_payload.press_t0_utc, now);
+    return;
+  }
+  out->mode = MODEL_GRAPH_LIVE;
+  out->now_idx = recorded;
 }
 
 static void prv_apply_error(DictionaryIterator *iter) {
@@ -232,7 +300,10 @@ void model_apply_inbox(DictionaryIterator *iter) {
     prv_apply_payload(iter);
   } else {
     APP_LOG(APP_LOG_LEVEL_ERROR, "model: unexpected MSG_TYPE=%d", (int)msg_type);
-    return;
   }
+  // Always notify: s_refreshing was cleared above, and the detail screens
+  // have no minute tick of their own. Skipping here leaves UPDATING up.
+  // prv_apply_payload's early returns (schema / PRESS_SERIES) also land
+  // here after setting ERROR; the watchdog path notifies on its own.
   prv_notify();
 }

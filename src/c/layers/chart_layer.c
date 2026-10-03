@@ -26,7 +26,11 @@ void chart_layer_draw(GContext *ctx, GRect rect, const ChartSpec *spec) {
   scale_series_ex(spec->series, srect, spec->min_span, pts);
 
   int16_t bottom = (int16_t)(rect.origin.y + rect.size.h - 1);
-  uint8_t now_idx = spec->now_idx;
+  // -1 (or anything else out of range below zero) omits the divider and
+  // treats every sample as already in the past. A too-large index is
+  // clamped so the loops below never read past the last point.
+  bool show_now = spec->now_idx >= 0 && spec->now_idx < SCALE_N_SAMPLES;
+  uint8_t now_idx = show_now ? (uint8_t)spec->now_idx : (uint8_t)(SCALE_N_SAMPLES - 1);
 
   if (spec->show_grid) {
     int16_t lo, hi;
@@ -75,13 +79,15 @@ void chart_layer_draw(GContext *ctx, GRect rect, const ChartSpec *spec) {
     }
   }
 
-  // Now divider: full plot height.
-  graphics_context_set_stroke_color(ctx, GColorWhite);
-  graphics_draw_line(ctx, GPoint(pts[now_idx].x, rect.origin.y), GPoint(pts[now_idx].x, bottom));
+  if (show_now) {
+    // Now divider: full plot height.
+    graphics_context_set_stroke_color(ctx, GColorWhite);
+    graphics_draw_line(ctx, GPoint(pts[now_idx].x, rect.origin.y), GPoint(pts[now_idx].x, bottom));
 
-  // Current-value dot.
-  graphics_context_set_fill_color(ctx, GColorWhite);
-  graphics_fill_circle(ctx, GPoint(pts[now_idx].x, pts[now_idx].y), 3);
+    // Current-value dot.
+    graphics_context_set_fill_color(ctx, GColorWhite);
+    graphics_fill_circle(ctx, GPoint(pts[now_idx].x, pts[now_idx].y), 3);
+  }
 
   // Scrub cursor: a secondary marker so a detail screen can highlight a
   // scanned-to sample without disturbing the now-divider/dot above.

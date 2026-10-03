@@ -14,6 +14,12 @@ A Pebble Time 2 watchapp: current conditions, a **barometric pressure graph**
 > B/W platforms (`aplite`/`diorite`/`flint`) beyond the one already-confirmed
 > status-dot-shape check — `emery` is the only platform the project actually
 > targets.
+>
+> A launch with a cache whose now-divider is an hour or more behind the clock
+> shows an `UPDATING` placeholder in the barograph while the refresh is in
+> flight, instead of that stale curve. If the refresh fails, the cached curve
+> comes back with the divider re-anchored to the current hour (or omitted once
+> the series no longer covers now). See [docs/design/03-barograph.md](docs/design/03-barograph.md).
 > Start at **[PLAN.md](PLAN.md)**.
 
 ## Why this exists

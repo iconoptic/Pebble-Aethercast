@@ -74,6 +74,20 @@ static void prv_click_config_provider(void *context) {
   window_single_click_subscribe(BUTTON_ID_SELECT, prv_select_click);
 }
 
+static void prv_window_appear(Window *window) {
+  (void)window;
+  if (s_spec.appear) {
+    s_spec.appear(s_spec.context);
+  }
+}
+
+static void prv_window_disappear(Window *window) {
+  (void)window;
+  if (s_spec.disappear) {
+    s_spec.disappear(s_spec.context);
+  }
+}
+
 static void prv_window_load(Window *window) {
   Layer *root = window_get_root_layer(window);
   GRect bounds = layer_get_bounds(root);
@@ -88,6 +102,10 @@ static void prv_window_load(Window *window) {
 static void prv_window_unload(Window *window) {
   layer_destroy(s_content);
   s_content = NULL;
+  // detail_window_push creates a Window on every open; free it here so
+  // open/close cycles do not leak (aplite heap is ~8 KB).
+  window_destroy(window);
+  s_window = NULL;
 }
 
 void detail_window_push(const DetailSpec *spec) {
@@ -97,6 +115,8 @@ void detail_window_push(const DetailSpec *spec) {
   window_set_window_handlers(s_window, (WindowHandlers){
     .load = prv_window_load,
     .unload = prv_window_unload,
+    .appear = prv_window_appear,
+    .disappear = prv_window_disappear,
   });
   window_stack_push(s_window, false);
 }

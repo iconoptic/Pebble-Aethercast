@@ -9,7 +9,11 @@ A Pebble Time 2 watchapp showing current conditions, a **barometric pressure gra
 > screenshots (`docs/screenshots/m10-emery-*.png`) and a live real-device
 > round trip on `emery` (Pebble Time 2, over the phone's Developer Connection)
 > are all done — see §9 exit criteria for the two low-priority secondary-
-> platform checks still open.
+> platform checks still open. A later fix stops an hours-old cache from being
+> drawn as a live barograph: while a refresh is in flight and the cached
+> now-divider is at least one hourly sample behind the clock, the plot zone
+> shows an `UPDATING` placeholder; a failed refresh re-anchors that divider
+> to the wall clock (see [docs/design/03-barograph.md](docs/design/03-barograph.md)).
 > Every hardware/API claim below was verified against a live source on 2026-09-05.
 > Sources are cached offline in [docs/vendor](docs/vendor) — see [docs/research/00-platform-findings.md](docs/research/00-platform-findings.md).
 
@@ -387,11 +391,19 @@ flowchart TD
     J --> K[PKJS_READY arrives → request refresh]
     K --> L{payload within 30 s?}
     L -- yes --> M[persist_write + redraw, dot GREEN]
-    L -- no --> N[Dot RED, keep showing cached data]
+    L -- no --> N[Dot RED, cached curve, now-divider re-anchored]
 ```
 
 The freshness threshold only colours the dot; the launch refresh is unconditional,
 because the payload is small and the fetch happens on the phone.
+
+A second threshold, `MODEL_GRAPH_MISLEADING_AFTER_S` (one hourly sample, 3600 s),
+gates the barograph itself. While a refresh is in flight and the cached
+now-divider would be a sample or more off, the plot is a loading placeholder
+instead of the stale curve. If that refresh fails, the cached curve is shown
+with the divider re-anchored to `(now − press_t0_utc) / 3600`, or with no
+divider once the series no longer covers the present. See
+[docs/design/03-barograph.md](docs/design/03-barograph.md).
 
 Struct is ~140 bytes, comfortably under the documented 256-byte
 `PERSIST_DATA_MAX_LENGTH`, in a single key. No paging needed.

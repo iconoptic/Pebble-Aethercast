@@ -10,6 +10,8 @@ typedef struct {
   GRect from_rect;                                        // dashboard zone rect to grow from/shrink into
   void (*draw)(GContext *ctx, GRect bounds, void *context); // draws chrome + chart into the current animated bounds
   void (*click)(ButtonId id, void *context);               // UP/DOWN/SELECT forwarded here; BACK always closes
+  void (*appear)(void *context);                           // window became visible; register a model listener here
+  void (*disappear)(void *context);                        // window left the screen; remove only that listener
   void *context;
 } DetailSpec;
 

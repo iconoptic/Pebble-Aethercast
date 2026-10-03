@@ -77,6 +77,24 @@ int16_t scale_grid_step(int16_t lo, int16_t hi) {
   return scale_grid_step_ex(lo, hi, steps, 3);
 }
 
+int scale_reanchor_now_idx(int32_t t0_utc, int32_t now_utc) {
+  int32_t delta_s = now_utc - t0_utc;
+  if (delta_s < 0) {
+    // Clock before the series: omit the divider, same as past the end.
+    return -1;
+  }
+  int32_t idx = delta_s / SCALE_SAMPLE_PERIOD_S;
+  if (idx >= SCALE_N_SAMPLES) {
+    return -1;
+  }
+  return (int)idx;
+}
+
+int32_t scale_recorded_now_lag_s(int32_t t0_utc, uint8_t now_idx, int32_t now_utc) {
+  int32_t recorded = t0_utc + (int32_t)now_idx * SCALE_SAMPLE_PERIOD_S;
+  return now_utc - recorded;
+}
+
 int16_t scale_trend_delta3(const int16_t series[SCALE_N_SAMPLES], uint8_t now_idx) {
   if (now_idx < 3 || now_idx >= SCALE_N_SAMPLES) {
     return 0;

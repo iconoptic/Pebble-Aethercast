@@ -10,7 +10,11 @@
 // docs/design/03-barograph.md "Rendering".
 typedef struct {
   const int16_t *series;  // SCALE_N_SAMPLES samples
-  uint8_t now_idx;         // clamped to < SCALE_N_SAMPLES by the caller
+  // 0 .. SCALE_N_SAMPLES-1 splits past (solid) from forecast (dashed) and
+  // places the now-divider. -1 means the series does not cover the present:
+  // the whole curve is drawn as the past segment, with no divider and no
+  // current-value dot. See docs/design/03-barograph.md.
+  int now_idx;
   int16_t min_span;        // SCALE_MIN_SPAN or SCALE_MIN_SPAN_TEMP
   GColor line_color;       // past segment, forecast segment, tint and dot
   uint8_t past_width;      // past-segment stroke width (trend width on B/W)
