@@ -39,4 +39,5 @@ module.exports = {
   DAILY_T0_UTC: 10029,
   PLACE_CHANGE: 10030,
   PRESS_DELTA3: 10031,
+  SAMPLE_HRS: 10032,
 };

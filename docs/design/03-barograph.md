@@ -211,8 +211,10 @@ want to notice.
 ## Limits of the stitched history
 
 The phone runs on launch, on SELECT / a header tap, and when Clay settings
-are saved. It does not sample in the background, and `recordFix` runs only
-from that refresh. Three consequences:
+are saved. With Background location off (the default), it does not sample
+in the background, and `recordFix` runs only from that refresh. With
+Background location on, the same refresh (and `recordFix`, when Follow me
+is on) also runs on an opt-in wakeup every N hours. Three consequences:
 
 - A place's recorded time is when the app first saw the user there.
   `appendFix` keeps that first-seen time and does not move it when the same

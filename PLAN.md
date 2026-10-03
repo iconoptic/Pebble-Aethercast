@@ -155,13 +155,16 @@ sequenceDiagram
 
     U->>C: SELECT / tap header (any time after launch)
     C->>P: AppMessage {REQUEST: 1}
-    Note over C,P: Same fetch/error path repeats - no polling, only user- or settings-triggered
+    Note over C,P: Same fetch/error path repeats - user, settings, or an opt-in wakeup
 ```
 
 
-After that first exchange the watch only fetches again when the user asks:
+After that first exchange the watch fetches again when the user asks:
 `SELECT` (or a tap on the header) sends another `REQUEST`, and saving the Clay
-settings page triggers one from the phone side. There is no background polling.
+settings page triggers one from the phone side. **Background location** (Clay,
+off by default) adds a third trigger: a scheduled wakeup launches the app,
+skips the dashboard, runs this same refresh, and exits. See
+[docs/research/01-background-refresh.md](docs/research/01-background-refresh.md).
 
 With **Pressure history: Follow me** (the default) that refresh may name up to
 six coordinates in the one Open-Meteo request: the past 24 h is stitched from
@@ -175,12 +178,15 @@ See [docs/design/01-data-protocol.md](docs/design/01-data-protocol.md).
 graph LR
     subgraph src_c["src/c/"]
         MAIN["main.c<br/>app lifecycle only"]
+        SAMPLE["sample.c<br/>opt-in wakeup"]
+        SCHED["sample_schedule.c<br/>⚙ pure, host-testable"]
         COMM["comm.c<br/>AppMessage in/out, retry"]
         MODEL["model.c<br/>WeatherPayload struct,<br/>persist load/save, staleness"]
         WIN1["windows/dashboard.c<br/>zones, tick, buttons, touch"]
         WIN2["windows/detail_window.c<br/>generic animated container"]
         WIN3["windows/baro_detail.c"]
         WIN4["windows/temp_detail.c"]
+        WIN5["windows/sample_window.c<br/>quiet wakeup launch"]
         L_CHART["layers/chart_layer.c<br/>shared scale-to-rect draw"]
         L_BARO["layers/barograph_layer.c"]
         L_MOON["layers/moon_layer.c"]
@@ -199,6 +205,7 @@ graph LR
         PACK["pack.js<br/>JSON → wire dict"]
         TRAIL["trail.js<br/>where the user was,<br/>stitched 24 h"]
         CFG["config.js<br/>Clay schema"]
+        HOURS["sample_hours.js"]
     end
 
     subgraph tests["tests/ (host gcc + node, no Pebble)"]
@@ -207,9 +214,12 @@ graph LR
         T3["test_units.c"]
         T4["test_wmo.c"]
         T5["pack.test.js<br/>trail.test.js"]
+        T6["test_sample_schedule.c<br/>sample_hours.test.js"]
     end
 
     MAIN --> COMM --> MODEL
+    MAIN --> SAMPLE --> SCHED
+    MAIN --> WIN5
     MAIN --> WIN1 --> L_BARO & L_MOON & L_COND & L_FOOT
     WIN1 --> WIN3 & WIN4
     WIN3 & WIN4 --> WIN2
@@ -223,16 +233,19 @@ graph LR
     IDX --> API --> PACK
     IDX --> TRAIL --> PACK
     IDX --> CFG
+    IDX --> HOURS
     T1 -.-> LIB_MOON
     T2 -.-> LIB_SCALE
     T3 -.-> LIB_UNITS
     T4 -.-> LIB_WMO
     T5 -.-> PACK
+    T6 -.-> SCHED
 
     style LIB_MOON fill:#238636,color:#fff
     style LIB_SCALE fill:#238636,color:#fff
     style LIB_WMO fill:#238636,color:#fff
     style LIB_UNITS fill:#238636,color:#fff
+    style SCHED fill:#238636,color:#fff
 ```
 
 The green modules are deliberately free of any `pebble.h` dependency so they
@@ -626,14 +639,15 @@ silently past the watch's 30 s watchdog with no `ERR_CODE` at all.
 |---|---|---|
 | PT2 has no barometer | Core feature can't use local sensor | Model MSL pressure from Open-Meteo; gains a 12 h forecast segment the sensor never could. Documented honestly in-app. |
 | `past_hours` + `daily` interaction undocumented | Wrong sample count | Already smoke-tested live: exactly 36 samples. Defensive: JS pads/truncates to 36 and forward-fills nulls. |
-| Open-Meteo free tier limits / outage | No data | Fetches only on launch and on explicit user refresh — no polling, so call volume stays far below the 10 000/day limit; cache-first render; a stale/error dot never blanks the screen. |
+| Open-Meteo free tier limits / outage | No data | Fetches on launch, on explicit user refresh, and (only if enabled) on a 1/2/4 h wakeup. Worst case is well under the 10 000/day limit; cache-first render; a stale/error dot never blanks the screen. |
 | Persistent storage limit ambiguity (docs 4 kB, blog 1 MB) | Write failure | Design to 4 kB / 256 B-per-key. Payload is ~140 B. |
 | Geolocation permission denied | No location | Clay manual lat/lon override; last known location persisted in JS `localStorage`. |
 | Real-device PebbleKit JS geolocation ignoring its native `timeout` | Silent hang past the watch's 30 s watchdog, generic "NO PHONE" instead of a real `ERR_CODE` | JS-side `GEOLOCATION_GUARD_MS` (20 s) `setTimeout` in `fetchAndSend()` wins if the native callback never fires at all; sends `ERR_CODE 2` (no fix) instead. |
 | 64-colour e-paper contrast | Unreadable graph | Restrict to a checked palette; verify every zone on the real device at M8; monochrome fallback path is the same code with `PBL_IF_COLOR_ELSE`. |
 | Touch unavailable in watchfaces | Blocks a future watchface variant | Ship as watchapp now; if a watchface is wanted later it must be button-only. Touch is strictly an enhancement, never the only path to any action. |
 | Emulator on Arch (unsupported distro) | Can't iterate locally | Package mapping above; CloudPebble as documented fallback. |
-| Sparse trail: no background polling | A drive between two opens is drawn as a step at the second open, not at the hour the user arrived | Tick marks first-seen; documented in `docs/design/03-barograph.md`; trend uses the current place's own delta. |
+| Sparse trail between refreshes | A drive between two opens is drawn as a step at the second open, not at the hour the user arrived | Tick marks first-seen; documented in `docs/design/03-barograph.md`; trend uses the current place's own delta. Opt-in Background location (wakeup every 1/2/4 h, default off) densifies the trail when Follow me is on. |
+| Wakeup interrupts other apps / battery | Opt-in background samples take the screen and burn a refresh | Off by default; skips Quiet Time and phone-disconnected launches; cancels when the trail cannot grow; Clay copy warns it may interrupt another open app. |
 
 ---
 
@@ -647,19 +661,20 @@ pebble-aethercast/
 ├─ wscript                     (M1)
 ├─ src/
 │  ├─ c/
-│  │  ├─ main.c  comm.c  model.c  wire.h
-│  │  ├─ windows/   dashboard.c  detail_window.c  baro_detail.c  temp_detail.c
+│  │  ├─ main.c  comm.c  model.c  sample.c  sample_schedule.c  wire.h
+│  │  ├─ windows/   dashboard.c  detail_window.c  baro_detail.c  temp_detail.c  sample_window.c
 │  │  ├─ layers/    chart_layer.c  barograph_layer.c  moon_layer.c  conditions_layer.c
 │  │  │             icon_layer.c  footer_layer.c
 │  │  └─ lib/       moon.c  scale.c  wmo.c  units.c   ← host-testable, no pebble.h
-│  └─ pkjs/         index.js  openmeteo.js  pack.js  trail.js  config.js
+│  └─ pkjs/         index.js  openmeteo.js  pack.js  trail.js  sample_hours.js  config.js
 ├─ tests/           Makefile  shim.h  test_main.c  js/message_keys.js  fixtures/
-│                   test_moon.c  test_scale.c  test_units.c  test_wmo.c  pack.test.js
+│                   test_moon.c  test_scale.c  test_units.c  test_wmo.c  test_sample_schedule.c
+│                   pack.test.js  trail.test.js  sample_hours.test.js
 ├─ tools/
 │  ├─ fetch-docs.sh            ← refreshes docs/vendor (already working)
 │  └─ fake_payload.js          (M4)
 └─ docs/
-   ├─ research/00-platform-findings.md
+   ├─ research/00-platform-findings.md  01-background-refresh.md
    ├─ design/01-data-protocol.md
    ├─ design/02-moon-phase.md
    ├─ design/03-barograph.md

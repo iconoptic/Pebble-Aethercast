@@ -108,10 +108,11 @@ Do not assume index 1.
 
 The past half of the barograph is stitched from the user's trail
 (`src/pkjs/trail.js`), so one refresh may ask for more than one coordinate.
-A trail entry is written only on a refresh (launch, SELECT, or saving
-settings). Its time is when that refresh first saw the user there. A place
-passed between two refreshes is absent, and the place-change tick falls on
-the first hour of the newly seen place. See
+A trail entry is written only on a refresh (launch, SELECT, saving
+settings, or — when Background location is on and Follow me is active —
+an opt-in wakeup). Its time is when that refresh first saw the user there.
+A place passed between two refreshes is absent, and the place-change tick
+falls on the first hour of the newly seen place. See
 [03-barograph.md](03-barograph.md) "Limits of the stitched history".
 Open-Meteo accepts comma-separated `latitude` and `longitude` lists of equal
 length. Verified live on 2026-10-02 for Denver (`39.74,-104.99`) and Kansas
@@ -207,6 +208,7 @@ dictionary, not separate messages.
 | `LAT_SIGN` | int8 | +1 / −1 | southern hemisphere moon mirroring |
 | `PLACE_CHANGE` | bytes[5] | 36 bits, little-endian | **optional.** Bit `i` is set when slot `i`'s place differs from slot `i-1`. Absent (or the wrong length) means no moves: the watch draws no ticks. All-zero masks are not sent. |
 | `PRESS_DELTA3` | int16 | tenths hPa | **optional.** Sent only when a place change falls inside the 3 h trend window. It is the current location's own `pressure[now] − pressure[now−3]`, so the step is not classified as weather. Absent means "compute it from `PRESS_SERIES`", which is what a single-place series already is. `0` is a real override and is sent. |
+| `SAMPLE_HRS` | int32 | 0, 1, 2, or 4 | **optional side channel**, on both `MSG_TYPE` 1 and 2. Hours between opt-in background location samples. `0` is off (the default). Absent means an older phone build: the watch keeps whatever interval it already stored. Not part of `WeatherPayload` — the watch persists it under its own key. See [docs/research/01-background-refresh.md](../research/01-background-refresh.md). |
 | `ERR_CODE` | uint8 | only when `MSG_TYPE=2` | |
 
 Total ≈ 280 bytes of values (core + forecast fields) plus dictionary overhead
