@@ -13,12 +13,13 @@ SRC = ../src/c/lib/scale.c ../src/c/lib/moon.c ../src/c/lib/units.c ../src/c/lib
 run: $(SRC) shim.h ../src/c/lib/scale.h ../src/c/lib/moon.h ../src/c/lib/units.h ../src/c/lib/wmo.h
 	$(CC) $(CFLAGS) -o run $(SRC) $(LDLIBS)
 
-# JS-side tests for src/pkjs/pack.js - no Pebble SDK or `pebble build`
-# needed, unlike tools/fake_payload.js's standalone mode (js/message_keys.js
-# is a hand-written stub, see that file's header comment).
+# JS-side tests for src/pkjs/pack.js and geocode.js - no Pebble SDK or
+# `pebble build` needed, unlike tools/fake_payload.js's standalone mode
+# (js/message_keys.js is a hand-written stub, see that file's header comment).
 .PHONY: js
 js:
 	NODE_PATH="$(CURDIR)/js" node pack.test.js
+	NODE_PATH="$(CURDIR)/js" node geocode.test.js
 
 .PHONY: check
 check: run js

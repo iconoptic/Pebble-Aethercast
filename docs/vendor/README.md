@@ -27,6 +27,7 @@ flattened to single lines — good enough to read and grep, not to copy verbatim
 | [openmeteo-forecast-api](openmeteo-forecast-api.md) | <https://open-meteo.com/en/docs> |
 | [openmeteo-geocoding-api](openmeteo-geocoding-api.md) | <https://open-meteo.com/en/docs/geocoding-api> |
 | [openmeteo-terms](openmeteo-terms.md) | <https://open-meteo.com/en/terms> |
+| [bigdatacloud-reverse-geocode-client](bigdatacloud-reverse-geocode-client.md) | <https://www.bigdatacloud.com/docs/article/fair-use-policy-for-free-client-side-reverse-geocoding-api> |
 | [pebble-app-configuration](pebble-app-configuration.md) | <https://developer.repebble.com/guides/user-interfaces/app-configuration/> |
 | [pebble-app-metadata](pebble-app-metadata.md) | <https://developer.repebble.com/guides/tools-and-resources/app-metadata/> |
 | [pebble-app-resources](pebble-app-resources.md) | <https://developer.repebble.com/guides/app-resources/> |

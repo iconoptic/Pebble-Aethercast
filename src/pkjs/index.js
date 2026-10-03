@@ -3,6 +3,7 @@
 
 var MessageKeys = require('message_keys');
 var openmeteo = require('./openmeteo');
+var geocode = require('./geocode');
 var pack = require('./pack');
 var Clay = require('@rebble/clay');
 var clayConfig = require('./config');
@@ -44,11 +45,13 @@ function loadSettings() {
   } catch (e) {
     raw = {};
   }
+  var manualName = raw.manualLocName == null ? '' : String(raw.manualLocName).trim();
   return {
     unitSystem: raw.UNIT_SYSTEM === 1 ? 1 : UNITS_IMPERIAL,
     manualLocationEnabled: !!raw.manualLocationEnabled,
     manualLat: parseFloat(raw.manualLat),
-    manualLon: parseFloat(raw.manualLon)
+    manualLon: parseFloat(raw.manualLon),
+    manualLocName: manualName
   };
 }
 
@@ -80,18 +83,98 @@ function fetchAndSend() {
     return;
   }
 
-  function onCoords(lat, lon) {
+  function onCoords(lat, lon, opts) {
+    opts = opts || {};
+    // Label rules:
+    // - Manual mode: optional Clay name, else timezone city. Never geocode.
+    // - GPS within 2 km of the cached place: use the cache, no network call.
+    // - Otherwise geocode in parallel with the forecast; when the forecast
+    //   lands, wait at most NAME_WAIT_MS for a name, then send once. A late
+    //   name only updates the cache for the next refresh.
+    var placeName = null;
+    var geocodePending = false;
+    var sent = false;
+    var forecastJson = null;
+    var forecastErr = null;
+    var waitTimer = null;
+    // Set when the post-forecast grace timer fires so a slightly-early
+    // setTimeout cannot schedule another full NAME_WAIT_MS wait.
+    var graceExpired = false;
+
+    function trySend() {
+      if (sent) return;
+      if (forecastErr !== null) {
+        sent = true;
+        if (waitTimer !== null) clearTimeout(waitTimer);
+        sendDict(pack.packError(forecastErr));
+        return;
+      }
+      if (forecastJson === null) return;
+
+      var waitedMs = graceExpired ? geocode.NAME_WAIT_MS : 0;
+      var decision = geocode.decideAfterForecast(
+        placeName, geocodePending, waitedMs, geocode.NAME_WAIT_MS);
+      if (decision === 'wait') {
+        if (waitTimer === null) {
+          waitTimer = setTimeout(function () {
+            waitTimer = null;
+            graceExpired = true;
+            trySend();
+          }, geocode.NAME_WAIT_MS);
+        }
+        return;
+      }
+
+      sent = true;
+      if (waitTimer !== null) {
+        clearTimeout(waitTimer);
+        waitTimer = null;
+      }
+      sendDict(pack.packPayload(forecastJson, Math.floor(Date.now() / 1000),
+                                 settings.unitSystem, placeName));
+    }
+
+    if (opts.manual) {
+      placeName = opts.manualName || null;
+    } else {
+      var cached = geocode.nameFromCache(geocode.loadCache(localStorage), lat, lon);
+      if (cached) {
+        placeName = cached;
+      } else {
+        geocodePending = true;
+        geocode.reverseCity(lat, lon, function (name) {
+          geocodePending = false;
+          if (name) {
+            placeName = name;
+            geocode.saveCache(localStorage, lat, lon, name,
+                              Math.floor(Date.now() / 1000));
+          } else {
+            console.log('AetherCast: reverse geocode missed, location label falls back to timezone');
+          }
+          // Late result: cache already updated; do not send a second payload.
+          trySend();
+        });
+      }
+    }
+
     openmeteo.fetchForecast(lat, lon, function (json) {
-      sendDict(pack.packPayload(json, Math.floor(Date.now() / 1000), settings.unitSystem));
+      forecastJson = json;
+      trySend();
     }, function (errCode) {
-      sendDict(pack.packError(errCode));
+      forecastErr = errCode;
+      trySend();
     });
   }
 
   // Clay manual location override bypasses navigator.geolocation entirely -
-  // per PLAN.md's mitigation for "Geolocation permission denied".
+  // per PLAN.md's mitigation for "Geolocation permission denied". Manual
+  // coordinates must not be sent to BigDataCloud (fair-use: live device fix
+  // only); the optional Clay name labels the header instead.
   if (settings.manualLocationEnabled && isFinite(settings.manualLat) && isFinite(settings.manualLon)) {
-    onCoords(settings.manualLat, settings.manualLon);
+    onCoords(settings.manualLat, settings.manualLon, {
+      manual: true,
+      manualName: settings.manualLocName || null
+    });
     return;
   }
 
@@ -106,7 +189,7 @@ function fetchAndSend() {
     if (settled) return;
     settled = true;
     clearTimeout(guard);
-    onCoords(pos.coords.latitude, pos.coords.longitude);
+    onCoords(pos.coords.latitude, pos.coords.longitude, { manual: false });
   }, function (err) {
     if (settled) return;
     settled = true;

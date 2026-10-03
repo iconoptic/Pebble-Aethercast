@@ -2,8 +2,8 @@
 //
 // UNIT_SYSTEM's messageKey matches a real watch-facing key (package.json /
 // message_keys.json) - src/pkjs/index.js forwards it to the watch on every
-// refresh (via pack.js). manualLocationEnabled/manualLat/manualLon are
-// JS-only: they never go over AppMessage, only into Clay's own localStorage,
+// refresh (via pack.js). manualLocationEnabled/manualLat/manualLon/manualLocName
+// are JS-only: they never go over AppMessage, only into Clay's own localStorage,
 // per PLAN.md's "Clay manual lat/lon override" risk mitigation. index.js
 // handles showConfiguration/webviewclosed manually (autoHandleEvents: false)
 // so it can choose which settings actually reach the watch.
@@ -50,12 +50,19 @@ module.exports = [
         "messageKey": "manualLon",
         "label": "Longitude",
         "attributes": { "type": "number", "step": "0.0001", "placeholder": "e.g. -104.9903" }
+      },
+      {
+        "type": "input",
+        "messageKey": "manualLocName",
+        "label": "Location name (manual mode only)",
+        "defaultValue": "",
+        "attributes": { "type": "text", "placeholder": "e.g. North Platte" }
       }
     ]
   },
   {
     "type": "text",
-    "defaultValue": "Manual location only changes where weather is fetched from - it is never sent anywhere except Open-Meteo."
+    "defaultValue": "Open-Meteo receives coordinates for the forecast. BigDataCloud receives coordinates rounded to about 1 km only on a GPS fix more than 2 km from the last named place, never in manual mode. In manual mode the optional location name (or the timezone city) labels the watch. A local place-name cache stays on the phone."
   },
   {
     "type": "submit",

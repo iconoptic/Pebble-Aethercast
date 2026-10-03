@@ -55,6 +55,8 @@ function testHappyPath() {
     assert.ok(Math.abs(temp[i] - fixture.hourly.temperature_2m[i]) <= 0.05,
               'TEMP_SERIES[' + i + '] round-trips within 0.1 degC precision');
   }
+  assert.strictEqual(dict[MessageKeys.LOC_NAME], 'DENVER',
+    'without a reverse-geocoded place, the header falls back to the timezone city');
   console.log('  ok: happy path (schema v3 fields present and correct)');
 }
 
@@ -99,8 +101,58 @@ function testOutlookPadsWhenDailyArraysAreShort() {
   console.log('  ok: short daily arrays pad by repeating the last day');
 }
 
+function testPlaceNameOverridesTimezoneCity() {
+  // Nebraska is Central Time, so Open-Meteo reports America/Chicago. The
+  // header must show the town at the coordinates, not that zone's city.
+  var moved = JSON.parse(JSON.stringify(fixture));
+  moved.timezone = 'America/Chicago';
+
+  var named = pack.packPayload(moved, nowUtcForFixture(), 1, '  North Platte  ');
+  assert.strictEqual(named[MessageKeys.LOC_NAME], 'NORTH PLATTE');
+
+  var fallback = pack.packPayload(moved, nowUtcForFixture(), 1, null);
+  assert.strictEqual(fallback[MessageKeys.LOC_NAME], 'CHICAGO');
+
+  var blank = pack.packPayload(moved, nowUtcForFixture(), 1, '   ');
+  assert.strictEqual(blank[MessageKeys.LOC_NAME], 'CHICAGO');
+
+  var longName = 'A Very Long Incorporated Place Name';
+  var truncated = pack.packPayload(moved, nowUtcForFixture(), 1, longName);
+  assert.strictEqual(truncated[MessageKeys.LOC_NAME], 'A VERY LONG INCORPORATE');
+  assert.strictEqual(truncated[MessageKeys.LOC_NAME].length, 23);
+  console.log('  ok: place name overrides timezone city and still fits LOC_NAME');
+}
+
+function utf8Bytes(s) {
+  return Buffer.from(s, 'utf8').length;
+}
+
+function testUtf8SafeLocName() {
+  var moved = JSON.parse(JSON.stringify(fixture));
+  moved.timezone = 'America/Chicago';
+
+  var zurich = pack.packPayload(moved, nowUtcForFixture(), 1, 'Zürich');
+  assert.strictEqual(zurich[MessageKeys.LOC_NAME], 'ZURICH');
+
+  // Folded ASCII is 26 bytes; must cut at a character boundary ≤ 23 bytes.
+  var sao = pack.packPayload(moved, nowUtcForFixture(), 1, 'São José dos Campos Norte');
+  assert.strictEqual(sao[MessageKeys.LOC_NAME], 'SAO JOSE DOS CAMPOS NOR');
+  assert.ok(utf8Bytes(sao[MessageKeys.LOC_NAME]) <= 23);
+
+  // Each CJK ideograph is 3 UTF-8 bytes → at most 7 characters (21 bytes);
+  // the 8th would be 24 and must not be included.
+  var cjkName = '東京特別区何か長い名前です';
+  var cjk = pack.packPayload(moved, nowUtcForFixture(), 1, cjkName);
+  assert.strictEqual(cjk[MessageKeys.LOC_NAME], '東京特別区何か');
+  assert.strictEqual(utf8Bytes(cjk[MessageKeys.LOC_NAME]), 21);
+  assert.ok(utf8Bytes(cjk[MessageKeys.LOC_NAME]) <= 23);
+  console.log('  ok: LOC_NAME folds accents and truncates on UTF-8 boundaries');
+}
+
 testHappyPath();
 testMissingHourlyTemperature();
 testMissingDailyWeatherCode();
 testOutlookPadsWhenDailyArraysAreShort();
+testPlaceNameOverridesTimezoneCity();
+testUtf8SafeLocName();
 console.log('all pack.js tests passed');

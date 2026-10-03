@@ -323,8 +323,13 @@ Smoke-tested live: returns **exactly 36 hourly samples**, ~1.8 kB, no API key.
 Free tier is non-commercial, < 10 000 calls/day — this app fetches once per launch
 plus whenever the user asks for a refresh, so it stays orders of magnitude under.
 
-Bonus: `timezone` comes back as e.g. `America/Denver`, which gives a free location
-label with zero extra requests and zero reverse-geocoding dependency.
+`timezone` comes back as e.g. `America/Denver`. That string is only a fallback
+location label: the zone's representative city is not the town at the
+coordinates (`America/Chicago` covers Nebraska). On GPS, the header uses a
+BigDataCloud reverse-geocoded place name (coordinates rounded to ~1 km, only
+when the fix is more than 2 km from the last named place) and falls back to
+the zone city when that misses. Manual mode never calls BigDataCloud; the
+optional Clay location name is used instead, else the zone city.
 
 ### 6.2 Wire format
 
@@ -352,7 +357,7 @@ The whole payload is ~280 bytes across ~27 keys. Full key table in
 | `DAILY_CODE` | bytes[4] | 4 × uint8, WMO code — today + 3-day outlook |
 | `DAILY_T0_UTC` | int32 | start-of-day epoch for outlook day 0 |
 | `SUNRISE_UTC`, `SUNSET_UTC`, `UPDATED_UTC` | int32 | epoch |
-| `LOC_NAME` | cstring ≤ 24 | derived from tz or Clay override |
+| `LOC_NAME` | cstring ≤ 24 | reverse-geocoded place, else timezone city |
 | `LAT_SIGN` | int8 | for southern-hemisphere moon mirroring |
 
 Design rules:
